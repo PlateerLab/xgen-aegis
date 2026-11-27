@@ -1,0 +1,28 @@
+{
+  "name": "xgen-aegis",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Plug-in governance layer for admin consoles: one graph, one chat, the host's own screens and actions.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/scan",
+    "packages/react",
+    "examples/demo"
+  ],
+  "scripts": {
+    "test": "node --test \"packages/*/test/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json",
+    "demo": "npm run dev -w xgen-aegis-demo"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.9.3"
+  }
+}

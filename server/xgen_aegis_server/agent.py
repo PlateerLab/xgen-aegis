@@ -1,0 +1,288 @@
+"""LLM tool calling over the governance graph. The model picks read tools (search, item, filtered list, gaps, linked items) and
+may propose actions; it never changes anything. Proposals go back to the chat, a person opens the host screen and approves.
+
+Works with any OpenAI-compatible /chat/completions endpoint (AEGIS_LLM_URL, AEGIS_LLM_MODEL, AEGIS_LLM_KEY or OPENAI_API_KEY).
+The answer has the same shape as the graph-only answer in @xgen-aegis/core: text, found, list, findings, proposals.
+"""
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.request
+from collections import deque
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from . import index as I
+
+MAX_ROUNDS = 5
+MAX_OUT = 900
+
+SYSTEM = """You are the governance assistant of an admin console. The console's items (users, agents, models, tools, resources, approval rules,
+policies) and their control gaps form a graph you read through tools. Answer in the language of the question.
+Rules:
+- Facts come only from tool results. Never invent numbers or names. Quote item names exactly as the tools give them.
+- "Linked by search" lists the items the question names. The screen shows them as "found", so do not write "I found". If nothing is linked
+  and the tools cannot find the name either, say plainly that the name was not found.
+- Answer only what was asked. A count, a list or a composition question gets the count and what it is (type name), nothing more. Problems,
+  causes and what to do are said only when asked. The screen shows lists, so name at most three items.
+- Counts of what an item is linked to are in get_item.link_counts, per type. Say the type name with the number and never add up different types.
+- For "what is X made of / how many Y does X have" call related(X, Y) to fetch the list; if the type is unknown, the tool returns the linked types.
+- Propose actions only when the question asks to fix, change or stop something: open the item with get_item, pick an action from its actions whose
+  label does what the gap's fix says, and call propose_action (up to three). Never claim something was changed; say it was proposed and waits for approval.
+- If no action fits, say the host has no setting for it.
+- No markdown, no ids."""
+
+TOOLS = [
+    {"type": "function", "function": {"name": "search_graph", "description": "Search the whole graph (OmniFuse) for items, gaps and relations about the query.",
+     "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "get_item", "description": "One item: attributes, link counts per type, links, its control gaps and the actions it allows. Name or id.",
+     "parameters": {"type": "object", "properties": {"ref": {"type": "string"}}, "required": ["ref"]}}},
+    {"type": "function", "function": {"name": "find_items", "description": "Items of one type filtered by attributes and sorted, e.g. type 'Agent', where [['shared','=','true']].",
+     "parameters": {"type": "object", "properties": {
+         "type": {"type": "string"},
+         "where": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3}, "description": "[attribute, op (= != contains >= <=), value]"},
+         "sort_by": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["type"]}}},
+    {"type": "function", "function": {"name": "list_gaps", "description": "Control gaps, optionally only those on one item.",
+     "parameters": {"type": "object", "properties": {"item": {"type": "string"}, "severity": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "related", "description": "Items of a type linked to an item (nearest layer first, up to 3 hops).",
+     "parameters": {"type": "object", "properties": {"ref": {"type": "string"}, "type": {"type": "string"}, "hops": {"type": "integer"}}, "required": ["ref"]}}},
+    {"type": "function", "function": {"name": "propose_action", "description": "Propose an action for a person to approve. action is an id or label from get_item.actions.",
+     "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "action": {"type": "string"}, "reason": {"type": "string"}}, "required": ["target", "action", "reason"]}}},
+]
+
+
+def _num(v: Any) -> float:
+    try:
+        return float(str(v).replace(",", "").split()[0])
+    except (ValueError, IndexError):
+        return 0.0
+
+
+class Session:
+    """Tool runner for one question. Keeps what was touched, the last list fetched and the proposals."""
+
+    def __init__(self, idx: I.GraphIndex):
+        self.idx = idx
+        self.touched: List[str] = []
+        self.proposals: List[Dict[str, str]] = []
+        self.last_list: List[str] = []
+        self.list_by = ""
+        self.used: List[Dict[str, Any]] = []
+
+    def resolve(self, ref: str) -> Optional[str]:
+        ref = (ref or "").strip()
+        if ref in self.idx.node:
+            return ref
+        names = self.idx.names_in(ref)
+        if names:
+            return names[0]
+        key = I.flat(ref)
+        part = [u for u, lab in self.idx.label_of.items() if key and key in I.flat(lab)]
+        part.sort(key=lambda u: (self.idx.type_of[u] == I.GAP, len(self.idx.label_of[u])))
+        return part[0] if part else None
+
+    def types(self, word: str) -> List[str]:
+        w = (word or "").strip().lower()
+        for k, ts in self.idx.class_words:
+            if k == w:
+                return list(ts)
+        return self.idx.types_in(w)
+
+    def label(self, t: str) -> str:
+        return self.idx.type_label.get(t, t)
+
+    def brief(self, u: str) -> Dict[str, Any]:
+        self.touched.append(u)
+        out = {"id": u, "name": self.idx.label_of[u], "type": self.label(self.idx.type_of[u]), "attrs": dict(self.idx.node[u].get("attrs", [])[:5])}
+        if self.idx.gap_count.get(u):
+            out["gaps"] = self.idx.gap_count[u]
+        return out
+
+    def counts(self, u: str) -> Dict[str, int]:
+        c: Dict[str, int] = {}
+        for x in self.idx.near(u):
+            c[self.label(self.idx.type_of[x])] = c.get(self.label(self.idx.type_of[x]), 0) + 1
+        return c
+
+    # tools
+    def search_graph(self, query: str) -> Dict[str, Any]:
+        ex = I.explore(self.idx, query)
+        return {"found": [self.idx.label_of[u] for u in ex["found"]], "items": [self.brief(u) for u in ex["items"][:12]], "relations": ex["relations"][:12]}
+
+    def get_item(self, ref: str) -> Dict[str, Any]:
+        u = self.resolve(ref)
+        if not u:
+            return {"error": f"no item named {ref}"}
+        self.touched.append(u)
+        n = self.idx.node[u]
+        gaps = [g for g in (self.idx.node[x].get("gap") for x in self.idx.node if self.idx.type_of[x] == I.GAP) if g and u in g["affected"]]
+        return {"id": u, "name": self.idx.label_of[u], "type": self.label(n["type"]), "attrs": dict(n.get("attrs", [])), "link_counts": self.counts(u),
+                "links": self.idx.links(u)[:14], "gaps": [{"title": g["title"], "severity": g["severity"], "fix": g["fix"]} for g in gaps][:10],
+                "actions": [{"id": a["id"], "label": a["label"], "kind": a["kind"]} for a in n.get("actions", [])],
+                "screen": self.idx.screen_of.get(n["type"])}
+
+    def find_items(self, type: str, where: Optional[List[List[str]]] = None, sort_by: str = "", limit: int = 15) -> Dict[str, Any]:
+        ts = self.types(type)
+        if not ts:
+            return {"error": f"unknown type {type}", "types": sorted({self.label(t) for t in set(self.idx.type_of.values())})}
+        ids = [u for u, t in self.idx.type_of.items() if t in ts]
+
+        def ok(u: str) -> bool:
+            a = dict(self.idx.node[u].get("attrs", []))
+            for cond in where or []:
+                if len(cond) != 3:
+                    continue
+                k, op, v = cond
+                have = a.get(k)
+                if op in ("=", "==") and str(have) != v or op == "!=" and str(have) == v or op == "contains" and v not in str(have or ""):
+                    return False
+                if op in (">=", "<=") and (have is None or (op == ">=" and _num(have) < _num(v)) or (op == "<=" and _num(have) > _num(v))):
+                    return False
+            return True
+
+        hit = [u for u in ids if ok(u)]
+        if where and not hit and ids:
+            names: Dict[str, set] = {}
+            for u in ids[:200]:
+                for k, v in self.idx.node[u].get("attrs", []):
+                    names.setdefault(k, set()).add(str(v))
+            return {"count": 0, "note": "Nothing matches. Use attribute names and values exactly as below.", "attrs": {k: sorted(v)[:6] for k, v in names.items()}}
+        if sort_by:
+            hit.sort(key=lambda u: -_num(dict(self.idx.node[u].get("attrs", [])).get(sort_by, 0)))
+        self.last_list, self.list_by = hit[:30], "find_items"
+        return {"count": len(hit), "items": [self.brief(u) for u in hit[: max(1, min(int(limit or 15), 30))]]}
+
+    def list_gaps(self, item: str = "", severity: str = "") -> Dict[str, Any]:
+        gs = [self.idx.node[x] for x in self.idx.node if self.idx.type_of[x] == I.GAP]
+        u = self.resolve(item) if item else None
+        if item:
+            gs = [g for g in gs if u and u in g["gap"]["affected"]]
+        if severity:
+            gs = [g for g in gs if g["gap"]["severity"] == severity]
+        self.last_list, self.list_by = [g["id"] for g in gs][:30], "list_gaps"
+        return {"count": len(gs), "gaps": [{"title": g["title"], "severity": g["gap"]["severity"], "fix": g["gap"]["fix"], "affected": len(g["gap"]["affected"])} for g in gs[:15]]}
+
+    def related(self, ref: str, type: str = "", hops: int = 2) -> Dict[str, Any]:
+        u = self.resolve(ref)
+        if not u:
+            return {"error": f"no item named {ref}"}
+        ts = set(self.types(type)) if type else set()
+        if type and not ts:
+            # an unknown type word: give the types actually linked so the model can pick
+            return {"error": f"unknown type {type}. Call again with one of these type names.", "linked_types": self.counts(u)}
+        seen = {u: 0}
+        q = deque([(u, 0)])
+        hits: List[Tuple[str, int]] = []
+        while q:
+            x, d = q.popleft()
+            if d >= max(1, min(int(hops or 2), 3)):
+                continue
+            for _, y in self.idx.adj.get(x, []):
+                if y in seen or self.idx.type_of.get(y) == I.GAP:
+                    continue
+                seen[y] = d + 1
+                if not ts or self.idx.type_of[y] in ts:
+                    hits.append((y, d + 1))
+                q.append((y, d + 1))
+        # the nearest layer is the answer; farther ones are only counted
+        nearest = min((d for _, d in hits), default=0)
+        found = [y for y, d in hits if d == nearest]
+        prev = self.last_list if self.list_by == "related" else []
+        self.last_list, self.list_by = list(dict.fromkeys(prev + found))[:30], "related"
+        self.touched.append(u)
+        out = {"from": self.idx.label_of[u], "count": len(found), "items": [self.brief(y) for y in found[:20]]}
+        if len(hits) > len(found):
+            out["farther"] = len(hits) - len(found)
+        return out
+
+    def propose_action(self, target: str, action: str, reason: str) -> Dict[str, Any]:
+        u = self.resolve(target)
+        if not u:
+            return {"error": "no such target"}
+        acts = self.idx.node[u].get("actions", [])
+        a = next((x for x in acts if x["id"] == action or I.flat(x["label"]) == I.flat(action)), None)
+        if not a:
+            return {"error": "that item has no such action", "actions": [{"id": x["id"], "label": x["label"]} for x in acts]}
+        if len(self.proposals) < 3 and not any(p["target"] == u and p["action"] == a["id"] for p in self.proposals):
+            self.proposals.append({"target": u, "action": a["id"], "label": a["label"], "reason": reason[:160]})
+        return {"ok": True}
+
+    def call(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        self.used.append({"name": name, "args": args})
+        fn = getattr(self, name, None) if name in {t["function"]["name"] for t in TOOLS} else None
+        if not fn:
+            return {"error": f"unknown tool {name}"}
+        try:
+            return fn(**args)
+        except TypeError as e:
+            return {"error": f"bad arguments: {e}"}
+
+
+def llm_config() -> Tuple[str, str, str]:
+    return (os.getenv("AEGIS_LLM_URL", "https://api.openai.com/v1"), os.getenv("AEGIS_LLM_MODEL", "gpt-5.4"),
+            os.getenv("AEGIS_LLM_KEY") or os.getenv("OPENAI_API_KEY") or "")
+
+
+def chat(messages: List[Dict[str, Any]], tools: bool) -> Dict[str, Any]:
+    url, model, key = llm_config()
+    body: Dict[str, Any] = {"model": model, "messages": messages, "max_completion_tokens": MAX_OUT}
+    if tools:
+        body["tools"] = TOOLS
+    req = urllib.request.Request(url.rstrip("/") + "/chat/completions", data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=45) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def ask(idx: I.GraphIndex, question: str, *, selected: Optional[str] = None, history: Optional[List[Dict[str, str]]] = None,
+        llm: Callable[[List[Dict[str, Any]], bool], Dict[str, Any]] = chat) -> Dict[str, Any]:
+    """Tool loop. Raises when the LLM cannot be reached (callers fall back to the graph-only answer)."""
+    t0 = time.perf_counter()
+    s = Session(idx)
+    found = [u for u in I.explore(idx, question)["found"] if idx.type_of[u] != I.GAP][:3]
+    ctx = ["Linked by search: " + (", ".join(f"{idx.label_of[u]} (id {u}, type {s.label(idx.type_of[u])})" for u in found) if found else "nothing")]
+    s.touched += found
+    if selected and selected in idx.node:
+        ctx.append(f"Selected item: {idx.label_of[selected]} (id {selected}). 'this' and 'it' mean this item.")
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM}]
+    for h in (history or [])[-6:]:
+        if h.get("role") in ("user", "assistant") and h.get("text"):
+            messages.append({"role": h["role"], "content": str(h["text"])[:500]})
+    messages.append({"role": "user", "content": "\n".join(ctx) + "\n\nQuestion: " + question})
+    answer = ""
+    for _ in range(MAX_ROUNDS):
+        m = llm(messages, True)["choices"][0]["message"]
+        calls = m.get("tool_calls") or []
+        if not calls:
+            answer = (m.get("content") or "").strip()
+            break
+        messages.append({"role": "assistant", "content": m.get("content") or "", "tool_calls": calls})
+        for c in calls:
+            try:
+                args = json.loads(c["function"].get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps(s.call(c["function"]["name"], args), ensure_ascii=False)[:6000]})
+    if not answer:
+        answer = (llm(messages + [{"role": "user", "content": "Answer with what you have."}], False)["choices"][0]["message"].get("content") or "").strip()
+    # no list tool used: if the answer names linked types of the item it opened, list those linked items
+    if not s.last_list:
+        opened = found + [x for x in (s.resolve(str(c["args"].get("ref", ""))) for c in s.used if c["name"] == "get_item") if x]
+        for u0 in dict.fromkeys(opened):
+            near = idx.near(u0)
+            rest, said = answer, set()
+            for t in sorted({idx.type_of[x] for x in near}, key=lambda t: -len(s.label(t))):
+                if s.label(t) in rest:
+                    said.add(t)
+                    rest = rest.replace(s.label(t), " ")
+            if said:
+                s.last_list = [x for x in near if idx.type_of[x] in said][:30]
+                break
+    lst = [u for u in s.last_list if u in idx.node and idx.type_of[u] != I.GAP]
+    if not lst:
+        # still nothing: the items the answer names, among those the tools looked at
+        lst = [u for u in dict.fromkeys(s.touched) if u not in found and idx.type_of.get(u) != I.GAP and len(idx.label_of[u]) >= 2 and idx.label_of[u] in answer]
+    gaps = [idx.node[u]["gap"]["id"] for u in s.last_list if idx.type_of.get(u) == I.GAP]
+    return {"text": answer, "found": found, "list": lst, "findings": gaps, "proposals": s.proposals,
+            "tools": [u["name"] for u in s.used], "model": llm_config()[1], "took": round((time.perf_counter() - t0) * 1000)}

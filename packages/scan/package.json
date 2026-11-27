@@ -1,0 +1,11 @@
+{
+  "name": "@xgen-aegis/scan",
+  "version": "0.1.0",
+  "description": "Read a host's screen contracts and menu tree into Aegis screens.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "bin": { "aegis-scan": "./src/bin.ts" },
+  "files": ["src"],
+  "dependencies": { "@xgen-aegis/core": "0.1.0", "typescript": "^5.9.3" }
+}

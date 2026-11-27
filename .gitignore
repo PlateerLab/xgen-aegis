@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.tmp-*/
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+screens.json

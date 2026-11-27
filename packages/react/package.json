@@ -1,0 +1,11 @@
+{
+  "name": "@xgen-aegis/react",
+  "version": "0.1.0",
+  "description": "Drop-in Aegis console: host menu tree, governance graph, chat, and host screens opened over the graph.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./aegis.css": "./src/aegis.css" },
+  "files": ["src"],
+  "dependencies": { "@xgen-aegis/core": "0.1.0" },
+  "peerDependencies": { "react": ">=18" }
+}

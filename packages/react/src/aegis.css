@@ -1,0 +1,81 @@
+/* Aegis UI. Override the variables to match the host. */
+.aegis-app {
+  --aegis-bg: #ffffff; --aegis-fg: #1f2937; --aegis-muted: #6b7280; --aegis-line: #e5e7eb; --aegis-accent: #3b5bdb; --aegis-accent-bg: #eef2ff;
+  --aegis-bad: #dc2626; --aegis-stage: #0b1020; --aegis-node: #9fb3ff; --aegis-edge: rgba(159, 179, 255, 0.25);
+  display: grid; grid-template-columns: 220px 1fr 380px; height: 100%; min-height: 0; font: 14px/1.5 system-ui, sans-serif; color: var(--aegis-fg); background: var(--aegis-bg);
+}
+@media (prefers-color-scheme: dark) {
+  .aegis-app:not([data-theme="light"]) { --aegis-bg: #111827; --aegis-fg: #e5e7eb; --aegis-muted: #9ca3af; --aegis-line: #374151; --aegis-accent: #8ea2ff; --aegis-accent-bg: #1e2550; }
+}
+@media (max-width: 900px) { .aegis-app { grid-template-columns: 1fr; grid-template-rows: auto 50vh auto; } }
+.aegis-app button { font: inherit; cursor: pointer; border: 1px solid var(--aegis-line); background: var(--aegis-bg); color: var(--aegis-fg); border-radius: 8px; padding: 4px 10px; }
+.aegis-app input, .aegis-app select { font: inherit; border: 1px solid var(--aegis-line); border-radius: 8px; padding: 5px 9px; background: var(--aegis-bg); color: var(--aegis-fg); }
+.aegis-primary { border-color: var(--aegis-accent) !important; background: var(--aegis-accent) !important; color: #fff !important; }
+.aegis-muted { color: var(--aegis-muted); }
+.aegis-bad { color: var(--aegis-bad); font-weight: 700; }
+.aegis-pad { padding: 16px; }
+.aegis-link { border: 0 !important; background: none !important; color: var(--aegis-accent) !important; padding: 2px 0 !important; }
+
+.aegis-nav { border-right: 1px solid var(--aegis-line); overflow: auto; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+.aegis-nav-title { font-weight: 800; font-size: 16px; padding: 4px 8px 10px; }
+.aegis-nav button { border: 0; text-align: left; width: 100%; }
+.aegis-nav-cat { font-weight: 600; }
+.aegis-nav-item { padding-left: 20px !important; color: var(--aegis-muted) !important; }
+.aegis-nav-item.on, .aegis-nav-self.on { background: var(--aegis-accent-bg) !important; color: var(--aegis-accent) !important; font-weight: 600; }
+
+.aegis-stage { position: relative; background: var(--aegis-stage); min-height: 0; overflow: hidden; }
+.aegis-graph { width: 100%; height: 100%; display: block; }
+.aegis-edge { stroke: var(--aegis-edge); stroke-width: 1; }
+.aegis-edge.on { stroke: #7cf0c0; stroke-width: 1.6; }
+.aegis-edge.dim { opacity: 0.25; }
+.aegis-node { cursor: pointer; }
+.aegis-node circle { fill: var(--aegis-node); stroke: #0b1020; stroke-width: 1.5; }
+.aegis-node circle.bad { fill: #ff8a8a; }
+.aegis-node.sel circle { stroke: #fff; stroke-width: 2.5; }
+.aegis-node.dim { opacity: 0.2; }
+.aegis-node text { fill: #e5e7eb; font-size: 12px; pointer-events: none; }
+.aegis-type { fill: #c7d2fe; font-size: 13px; font-weight: 700; }
+
+.aegis-overlay { position: absolute; inset: 0; display: flex; justify-content: center; align-items: flex-start; padding: 40px 20px 20px; background: rgba(8, 12, 30, 0.4); z-index: 10; }
+.aegis-screen { width: min(860px, 100%); max-height: 100%; display: flex; flex-direction: column; background: var(--aegis-bg); border-radius: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35); overflow: hidden; }
+.aegis-screen-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--aegis-line); }
+.aegis-screen-title { flex: 1; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.aegis-screen-title b { font-size: 15px; }
+.aegis-icon { border: 0 !important; font-size: 18px; }
+.aegis-screen-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--aegis-line); }
+.aegis-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.aegis-tabs button { border-radius: 999px; font-size: 12.5px; }
+.aegis-tabs button.on { border-color: var(--aegis-accent); color: var(--aegis-accent); font-weight: 700; }
+.aegis-search { margin-left: auto; width: 180px; }
+.aegis-waiting { padding: 8px 16px; border-bottom: 1px solid var(--aegis-line); background: rgba(245, 158, 11, 0.08); }
+.aegis-waiting-head { font-size: 12px; font-weight: 700; color: #b45309; margin-bottom: 4px; }
+.aegis-proposal { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 3px 0; }
+.aegis-screen-body { overflow: auto; min-height: 0; }
+.aegis-table { width: 100%; border-collapse: collapse; }
+.aegis-table th, .aegis-table td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--aegis-line); font-size: 13px; }
+.aegis-table th { position: sticky; top: 0; background: var(--aegis-bg); color: var(--aegis-muted); font-weight: 600; }
+.aegis-row { cursor: pointer; }
+.aegis-row.on td { background: var(--aegis-accent-bg); }
+.aegis-name { font-weight: 600; }
+.aegis-acts { white-space: nowrap; text-align: right; }
+.aegis-acts button { margin-left: 4px; font-size: 12.5px; }
+.aegis-risky-btn { color: var(--aegis-bad) !important; }
+.aegis-editor { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; background: var(--aegis-accent-bg); }
+.aegis-risky { color: var(--aegis-bad); font-size: 12px; }
+
+.aegis-side { border-left: 1px solid var(--aegis-line); min-height: 0; display: flex; }
+.aegis-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.aegis-log { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.aegis-msg { max-width: 100%; }
+.aegis-msg.me { align-self: flex-end; background: var(--aegis-accent-bg); padding: 6px 12px; border-radius: 12px; }
+.aegis-msg.bot p { margin: 0 0 6px; }
+.aegis-msg.pending { color: var(--aegis-muted); }
+.aegis-found { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 4px; font-size: 12.5px; }
+.aegis-found button { border-radius: 999px; background: var(--aegis-accent-bg); color: var(--aegis-accent); border-color: transparent; font-size: 12.5px; }
+.aegis-list { list-style: none; margin: 0 0 6px; padding: 0; }
+.aegis-list button { border: 0; padding: 2px 0; text-align: left; }
+.aegis-sev { font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.aegis-sev.high { color: var(--aegis-bad); }
+.aegis-proposals { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.aegis-ask { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--aegis-line); }
+.aegis-ask input { flex: 1; }

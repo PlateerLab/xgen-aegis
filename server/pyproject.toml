@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xgen-aegis-server"
+version = "0.1.0"
+description = "Aegis search server: OmniFuse over the governance graph, LLM tool calling that only proposes actions."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["../LICENSE.md"]
+dependencies = ["xgen-omnifuse>=0.8.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["xgen_aegis_server"]

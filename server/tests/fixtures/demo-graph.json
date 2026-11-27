@@ -1,0 +1,356 @@
+{
+ "readAt": "2026-11-27T07:12:32.154Z",
+ "types": {
+  "User": {
+   "label": "User",
+   "screen": "Users & access > Users"
+  },
+  "Model": {
+   "label": "Model",
+   "screen": "Settings > Models"
+  },
+  "Agent": {
+   "label": "Agent",
+   "screen": "Agent operations > Agents"
+  },
+  "Tool": {
+   "label": "Tool",
+   "screen": "Agent operations > Agents"
+  },
+  "ApprovalRule": {
+   "label": "Approval rule",
+   "screen": "Approval > Approval rules"
+  },
+  "TokenPolicy": {
+   "label": "Token limit",
+   "screen": "Agent operations > Token limits"
+  }
+ },
+ "nodes": [
+  {
+   "id": "user:u1",
+   "type": "User",
+   "title": "User 1",
+   "attrs": [
+    [
+     "role",
+     "admin"
+    ]
+   ],
+   "actions": [
+    {
+     "id": "users:PUT /api/admin/users/{userId}/role",
+     "label": "Role",
+     "kind": "update",
+     "input": "choice"
+    }
+   ]
+  },
+  {
+   "id": "user:u2",
+   "type": "User",
+   "title": "User 2",
+   "attrs": [
+    [
+     "role",
+     "maker"
+    ]
+   ],
+   "actions": [
+    {
+     "id": "users:PUT /api/admin/users/{userId}/role",
+     "label": "Role",
+     "kind": "update",
+     "input": "choice"
+    }
+   ]
+  },
+  {
+   "id": "user:u3",
+   "type": "User",
+   "title": "User 3",
+   "attrs": [
+    [
+     "role",
+     "staff"
+    ]
+   ],
+   "actions": [
+    {
+     "id": "users:PUT /api/admin/users/{userId}/role",
+     "label": "Role",
+     "kind": "update",
+     "input": "choice"
+    }
+   ]
+  },
+  {
+   "id": "model:m1",
+   "type": "Model",
+   "title": "in-house-llm",
+   "attrs": [
+    [
+     "provider",
+     "self-hosted"
+    ],
+    [
+     "external",
+     "false"
+    ]
+   ],
+   "actions": []
+  },
+  {
+   "id": "model:m2",
+   "type": "Model",
+   "title": "cloud-llm",
+   "attrs": [
+    [
+     "provider",
+     "cloud"
+    ],
+    [
+     "external",
+     "true"
+    ]
+   ],
+   "actions": []
+  },
+  {
+   "id": "agent:a1",
+   "type": "Agent",
+   "title": "Report writer",
+   "attrs": [
+    [
+     "shared",
+     "true"
+    ]
+   ],
+   "actions": [
+    {
+     "id": "agents:PUT /api/admin/agents/{agentId}",
+     "label": "Shared",
+     "kind": "update",
+     "input": "toggle"
+    },
+    {
+     "id": "agents:DELETE /api/admin/agents/{agentId}",
+     "label": "Delete",
+     "kind": "delete",
+     "input": "none"
+    }
+   ]
+  },
+  {
+   "id": "tool:web",
+   "type": "Tool",
+   "title": "web",
+   "attrs": [],
+   "actions": []
+  },
+  {
+   "id": "tool:files",
+   "type": "Tool",
+   "title": "files",
+   "attrs": [],
+   "actions": []
+  },
+  {
+   "id": "agent:a2",
+   "type": "Agent",
+   "title": "Policy checker",
+   "attrs": [
+    [
+     "shared",
+     "false"
+    ]
+   ],
+   "actions": [
+    {
+     "id": "agents:PUT /api/admin/agents/{agentId}",
+     "label": "Shared",
+     "kind": "update",
+     "input": "toggle"
+    },
+    {
+     "id": "agents:DELETE /api/admin/agents/{agentId}",
+     "label": "Delete",
+     "kind": "delete",
+     "input": "none"
+    }
+   ]
+  },
+  {
+   "id": "agent:a3",
+   "type": "Agent",
+   "title": "Shell helper",
+   "attrs": [
+    [
+     "shared",
+     "true"
+    ]
+   ],
+   "actions": [
+    {
+     "id": "agents:PUT /api/admin/agents/{agentId}",
+     "label": "Shared",
+     "kind": "update",
+     "input": "toggle"
+    },
+    {
+     "id": "agents:DELETE /api/admin/agents/{agentId}",
+     "label": "Delete",
+     "kind": "delete",
+     "input": "none"
+    }
+   ]
+  },
+  {
+   "id": "tool:shell",
+   "type": "Tool",
+   "title": "shell",
+   "attrs": [],
+   "actions": []
+  },
+  {
+   "id": "rule:agent.share",
+   "type": "ApprovalRule",
+   "title": "agent.share",
+   "attrs": [
+    [
+     "required",
+     "false"
+    ]
+   ],
+   "actions": [
+    {
+     "id": "approval-rules:PUT /api/admin/approval/rules/{action}",
+     "label": "Approval required",
+     "kind": "update",
+     "input": "toggle"
+    }
+   ]
+  },
+  {
+   "id": "rule:agent.deploy",
+   "type": "ApprovalRule",
+   "title": "agent.deploy",
+   "attrs": [
+    [
+     "required",
+     "true"
+    ]
+   ],
+   "actions": [
+    {
+     "id": "approval-rules:PUT /api/admin/approval/rules/{action}",
+     "label": "Approval required",
+     "kind": "update",
+     "input": "toggle"
+    }
+   ]
+  },
+  {
+   "id": "policy:p1",
+   "type": "TokenPolicy",
+   "title": "Limit 100000",
+   "attrs": [
+    [
+     "limit",
+     "100000"
+    ]
+   ],
+   "actions": []
+  }
+ ],
+ "edges": [
+  [
+   "user:u2",
+   "owns",
+   "agent:a1"
+  ],
+  [
+   "agent:a1",
+   "uses",
+   "model:m2"
+  ],
+  [
+   "agent:a1",
+   "calls",
+   "tool:web"
+  ],
+  [
+   "agent:a1",
+   "calls",
+   "tool:files"
+  ],
+  [
+   "user:u2",
+   "owns",
+   "agent:a2"
+  ],
+  [
+   "agent:a2",
+   "uses",
+   "model:m1"
+  ],
+  [
+   "agent:a2",
+   "calls",
+   "tool:files"
+  ],
+  [
+   "user:u3",
+   "owns",
+   "agent:a3"
+  ],
+  [
+   "agent:a3",
+   "uses",
+   "model:m2"
+  ],
+  [
+   "agent:a3",
+   "calls",
+   "tool:shell"
+  ],
+  [
+   "agent:a3",
+   "calls",
+   "tool:web"
+  ],
+  [
+   "policy:p1",
+   "limits",
+   "user:u3"
+  ]
+ ],
+ "gaps": [
+  {
+   "id": "share-without-approval",
+   "title": "Agents on external models are shared without approval",
+   "severity": "high",
+   "fix": "Require approval before an agent is shared.",
+   "affected": [
+    "rule:agent.share",
+    "agent:a1",
+    "agent:a3"
+   ],
+   "closeWith": [
+    "Approval required"
+   ]
+  },
+  {
+   "id": "shell-on-shared-agent",
+   "title": "Shared agents can run shell commands",
+   "severity": "medium",
+   "fix": "Stop sharing agents that call the shell tool, or remove the tool.",
+   "affected": [
+    "agent:a3"
+   ],
+   "closeWith": [
+    "Shared"
+   ]
+  }
+ ]
+}
