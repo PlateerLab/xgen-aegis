@@ -8,6 +8,7 @@ export const RULES: Rule[] = [
     severity: 'high',
     fix: 'Require approval before an agent is shared.',
     closeWith: ['Approval required'],
+    closeValue: true,
     check: (g: Graph) => {
       const rule = g.get('rule:agent.share');
       const open = g.ofType('Agent').filter((x) => x.props.shared && g.out(x.id, 'uses').some((m) => m.props.external));
@@ -20,6 +21,7 @@ export const RULES: Rule[] = [
     severity: 'medium',
     fix: 'Stop sharing agents that call the shell tool, or remove the tool.',
     closeWith: ['Shared'],
+    closeValue: false,
     check: (g: Graph) => g.ofType('Agent').filter((x) => x.props.shared && g.out(x.id, 'calls').some((t) => t.title === 'shell')).map((x) => x.id),
   },
 ];

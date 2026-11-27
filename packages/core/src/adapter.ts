@@ -5,6 +5,7 @@
 
 import type { Action } from './actions.ts';
 import type { Snapshot } from './graph.ts';
+import type { ListOptions } from './lists.ts';
 import type { RawRead } from './provenance.ts';
 import type { Screen } from './screens.ts';
 
@@ -22,4 +23,11 @@ export interface HostAdapter {
    * (it knows the host API, e.g. by `action.operation`). Optional: without it Aegis only proposes.
    */
   call?(method: string, path: string, input: unknown, action: Action): Promise<unknown>;
+  /**
+   * Read one host API (GET only). With it Aegis also reads the list of every screen the adapter does not cover, so no screen
+   * is left empty (see lists.ts for what is kept). Optional.
+   */
+  get?(path: string): Promise<unknown>;
+  /** How screen lists are kept (rows per list, value masking, row titles). */
+  lists?: ListOptions;
 }

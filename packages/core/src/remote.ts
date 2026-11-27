@@ -13,10 +13,10 @@ interface ServerAnswer {
   found: string[];
   list: string[];
   findings: string[];
-  proposals: { target: string; action: string; label: string; reason: string }[];
+  proposals: { target: string; action: string; label: string; reason: string; value?: unknown }[];
 }
 
-export async function askServer(url: string, aegis: Aegis, findings: Finding[], question: string, opt: { selected?: string | null; history?: { role: string; text: string }[]; labels?: Record<string, string>; words?: Words; timeoutMs?: number } = {}): Promise<Answer> {
+export async function askServer(url: string, aegis: Aegis, findings: Finding[], question: string, opt: { selected?: string | null; history?: { role: string; text: string; proposals?: unknown[] }[]; labels?: Record<string, string>; words?: Words; timeoutMs?: number } = {}): Promise<Answer> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opt.timeoutMs ?? 45000);
   try {
@@ -36,7 +36,7 @@ export async function askServer(url: string, aegis: Aegis, findings: Finding[], 
       findings: findings.filter((f) => s.findings.includes(f.rule)),
       proposals: s.proposals.flatMap((p) => {
         const action = aegis.actionsFor(p.target).find((a) => a.id === p.action);
-        return action ? [{ target: p.target, action, reason: p.reason }] : [];
+        return action ? [{ target: p.target, action, reason: p.reason, ...(p.value !== undefined ? { input: p.value } : {}) }] : [];
       }),
     };
   } catch {

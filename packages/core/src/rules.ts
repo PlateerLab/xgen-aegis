@@ -17,6 +17,8 @@ export interface Rule {
   check(graph: Graph): string[];
   /** Words to find the action that closes it among an item's actions (matched against action labels). */
   closeWith?: string[];
+  /** The value that action is given to close it (a toggle's true/false, a choice). */
+  closeValue?: unknown;
 }
 
 export interface Finding {
@@ -26,12 +28,13 @@ export interface Finding {
   fix: string;
   affected: string[];
   closeWith?: string[];
+  closeValue?: unknown;
 }
 
 export function evaluate(graph: Graph, rules: Rule[]): Finding[] {
   const order: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
   return rules
-    .map((r) => ({ rule: r.id, title: r.title, severity: r.severity, fix: r.fix, affected: r.check(graph), closeWith: r.closeWith }))
+    .map((r) => ({ rule: r.id, title: r.title, severity: r.severity, fix: r.fix, affected: r.check(graph), closeWith: r.closeWith, closeValue: r.closeValue }))
     .filter((f) => f.affected.length)
     .sort((a, b) => order[a.severity] - order[b.severity] || b.affected.length - a.affected.length);
 }

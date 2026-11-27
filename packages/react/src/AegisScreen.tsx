@@ -16,6 +16,8 @@ export interface AegisScreenProps {
   focus?: string | null;
   /** Action to open on the focused row right away (from a chat proposal). */
   action?: string | null;
+  /** Value to start that action with (what the chat proposed). */
+  input?: unknown;
   onPropose(p: Proposal): void;
   onDecide(p: Proposal, approve: boolean): void;
   onSelect?(id: string): void;
@@ -28,8 +30,8 @@ export interface AegisScreenProps {
 const COLS = 3;
 const shown = (v: unknown) => (Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? '✓' : '–') : v === undefined || v === null || v === '' ? '–' : String(v));
 
-function ActionEditor({ action, target, aegis, onPropose, onCancel, w }: { action: Action; target?: Item; aegis: Aegis; onPropose(p: Proposal): void; onCancel(): void; w: UiWords }) {
-  const [value, setValue] = useState<string>(action.input === 'toggle' ? 'true' : '');
+function ActionEditor({ action, target, aegis, onPropose, onCancel, w, preset }: { action: Action; target?: Item; aegis: Aegis; onPropose(p: Proposal): void; onCancel(): void; w: UiWords; preset?: unknown }) {
+  const [value, setValue] = useState<string>(preset !== undefined && preset !== null ? String(preset) : action.input === 'toggle' ? 'true' : '');
   const [reason, setReason] = useState('');
   const input = action.input === 'toggle' ? value === 'true' : action.input === 'none' ? undefined : value;
   return (
@@ -50,16 +52,16 @@ function ActionEditor({ action, target, aegis, onPropose, onCancel, w }: { actio
   );
 }
 
-export function AegisScreen({ aegis, menu, findings, proposals, focus, action, onPropose, onDecide, onSelect, onClose, hostBase, words = UI }: AegisScreenProps) {
+export function AegisScreen({ aegis, menu, findings, proposals, focus, action, input, onPropose, onDecide, onSelect, onClose, hostBase, words = UI }: AegisScreenProps) {
   const g = aegis.graph;
   const order = useMemo(() => [...(menu.primary ?? []), ...menu.types.filter((t) => !menu.primary?.includes(t))], [menu]);
   const [type, setType] = useState(() => (focus && g.get(focus)?.type) || order[0]);
   const [q, setQ] = useState('');
-  const [editing, setEditing] = useState<{ row?: string; action: string } | null>(focus && action ? { row: focus, action } : null);
+  const [editing, setEditing] = useState<{ row?: string; action: string } | null>(action ? { row: focus ?? undefined, action } : null);
   const body = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setType((focus && g.get(focus)?.type) || order[0]);
-    setEditing(focus && action ? { row: focus, action } : null);
+    setEditing(action ? { row: focus ?? undefined, action } : null);
   }, [menu.menu, focus, action]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') (editing ? setEditing(null) : onClose()); };
@@ -99,11 +101,12 @@ export function AegisScreen({ aegis, menu, findings, proposals, focus, action, o
               {order.map((t) => <button key={t} type="button" role="tab" aria-selected={t === type} className={t === type ? 'on' : ''} onClick={() => setType(t)}>{aegis.label(t)} {g.ofType(t).length}</button>)}
             </div>
           )}
-          {coll.map((a) => <button key={a.id} type="button" onClick={() => setEditing({ action: a.id })}>{a.label}</button>)}
+          {coll.length > 0 && <span className="aegis-muted">{words.screenActions}</span>}
+          {coll.map((a) => <button key={a.id} type="button" className={a.risky ? 'aegis-risky-btn' : ''} onClick={() => setEditing({ action: a.id })}>{a.label}</button>)}
           <input className="aegis-search" placeholder={words.findByName} value={q} onChange={(e) => setQ(e.target.value)} aria-label={words.findByName} />
         </div>
         {editing && !editing.row && coll.find((a) => a.id === editing.action) && (
-          <ActionEditor action={coll.find((a) => a.id === editing.action)!} aegis={aegis} w={words} onCancel={() => setEditing(null)} onPropose={(p) => { onPropose(p); setEditing(null); }} />
+          <ActionEditor action={coll.find((a) => a.id === editing.action)!} aegis={aegis} w={words} preset={editing.action === action ? input : undefined} onCancel={() => setEditing(null)} onPropose={(p) => { onPropose(p); setEditing(null); }} />
         )}
         {waiting.length > 0 && (
           <div className="aegis-waiting">
@@ -136,14 +139,14 @@ export function AegisScreen({ aegis, menu, findings, proposals, focus, action, o
                   </tr>,
                   ed ? (
                     <tr key={`${it.id}:edit`}><td colSpan={cols.length + 3}>
-                      <ActionEditor action={ed} target={it} aegis={aegis} w={words} onCancel={() => setEditing(null)} onPropose={(p) => { onPropose(p); setEditing(null); }} />
+                      <ActionEditor action={ed} target={it} aegis={aegis} w={words} preset={ed.id === action ? input : undefined} onCancel={() => setEditing(null)} onPropose={(p) => { onPropose(p); setEditing(null); }} />
                     </td></tr>
                   ) : null,
                 ];
               })}
             </tbody>
           </table>
-          {!rows.length && <div className="aegis-muted aegis-pad">{words.none}</div>}
+          {!rows.length && <div className="aegis-muted aegis-pad">{order.length ? words.none : words.noList}</div>}
         </div>
       </div>
     </div>

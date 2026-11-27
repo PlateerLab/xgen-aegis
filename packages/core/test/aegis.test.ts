@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { adapter, seed } from '../../../examples/demo/host.ts';
 import { RULES } from '../../../examples/demo/rules.ts';
-import { ask, evaluate, load, pathHit, pathKin, pathParams, pathUnder, toSearchGraph } from '../src/index.ts';
+import { ask, evaluate, load, pathHit, pathKin, pathParams, pathUnder, rowsOf, sameFamily, toSearchGraph, trimList } from '../src/index.ts';
 
 const SHARE_RULE = RULES[0];
 
@@ -43,10 +43,62 @@ test('screens: each type gets the screen that manages it, in the host menu order
   assert.ok(dash && dash.types.includes('Agent') && !dash.primary);
   assert.deepEqual(a.menus.map((m) => m.menu), [
     'Overview > Dashboard', 'Agent operations > Agents', 'Agent operations > Token limits', 'Users & access > Users', 'Approval > Approval rules', 'Settings > Models', 'System > System logs',
+    'System > Audit log', 'System > Cache',
   ]);
+  // the owner dropdown on the agents page reads the user list, but the agents page does not show users
+  assert.ok(!a.menus.find((m) => m.menu === 'Agent operations > Agents')!.types.includes('User'));
   assert.equal(home('ErrorGroup'), 'System > System logs');
   assert.equal(home('Service'), 'System > System logs');
   assert.equal(a.screenOf('Agent')?.route, '/admin?view=agents');
+});
+
+test('provenance: a summary that adds a value to a few items does not own the type', async () => {
+  const a = await load(adapter(seed()));
+  // the usage summary only knows the agents that were called (1 of 3)
+  assert.deepEqual(a.provenance.feeds.usage, ['Agent']);
+  assert.deepEqual(a.provenance.lost.usage, {});
+  assert.ok(!rowsOf(a.provenance, 'usage', 'Agent'));
+  assert.ok(rowsOf(a.provenance, 'agents', 'Agent'));
+  assert.equal(a.graph.get('agent:a1')!.props.calls, 1200);
+});
+
+test('screen lists: a screen no source covers is read through get(), with only safe columns', async () => {
+  const a = await load(adapter(seed()));
+  const audit = a.screenOf('List_audit_log')!;
+  assert.equal(audit.menu, 'System > Audit log');
+  assert.equal(a.label('List_audit_log'), 'Audit log');
+  const rows = a.graph.ofType('List_audit_log');
+  assert.deepEqual(rows.map((x) => x.title), ['Audit log #1', 'Audit log #2']);
+  // mail and free text are dropped, ids, flags and short words stay
+  assert.deepEqual(rows[0].props, { id: 'e1', at: '2026-11-27T09:00:00Z', user_id: 'u2', action: 'agent.share', ok: true });
+  // id columns link to the item they point at
+  assert.deepEqual(a.graph.out(rows[1].id, 'refersTo').map((x) => x.id), ['user:u3']);
+  // lists of screens an adapter source already covers are read and dropped (same resource family, that source makes items)
+  assert.deepEqual(a.coveredLists, ['list:agents', 'list:models', 'list:users', 'list:approval-rules', 'list:token-policies', 'list:system-logs', 'list:dashboard']);
+  // the export button is not a list
+  assert.equal(a.urls['list:audit-log'], '/api/admin/audit/events');
+});
+
+test('screen lists: rows keyed by their own id only, no titles when rows carry what people wrote', () => {
+  const t = trimList({ items: [{ uuid: 'x1', name: 'Nightly sync', owner_id: 'u1', share: { admin: true }, cpu: { usage: 3 }, token: 's3cret', note: 'hi' }], pagination: { total: 40 } })!;
+  assert.equal(t.total, 40);
+  assert.deepEqual(t.rows[0], { key: 'x1', title: 'Nightly sync', fields: { uuid: 'x1', owner_id: 'u1', 'cpu.usage': 3 } });
+  const authored = trimList([{ id: 7, title: 'Question about billing', question: 'why?', status: 'open' }])!;
+  assert.deepEqual(authored.rows[0], { key: '7', title: null, fields: { id: 7, status: 'open' } });
+  assert.equal(trimList({ ok: true }), null);
+  assert.ok(sameFamily('/api/admin/agents/list', '/api/admin/agents/42'));
+  assert.ok(!sameFamily('/api/admin/audit/events', '/api/admin/logs/errors'));
+});
+
+test('actions: every write API of every screen, bound to rows or to the screen', async () => {
+  const a = await load(adapter(seed()));
+  const acts = (menu: string) => a.actionsOf(a.menus.find((m) => m.menu === menu)!).map((x) => [x.label, x.types]);
+  // the agents source makes agents and tools; the action's operation names the agent
+  assert.deepEqual(acts('Agent operations > Agents'), [['Shared', ['Agent']], ['Delete', ['Agent']]]);
+  // a screen with nothing to list keeps its action, on the screen itself
+  const cache = a.menus.find((m) => m.menu === 'System > Cache')!;
+  assert.deepEqual(cache.types, []);
+  assert.deepEqual(a.collectionActions(cache).map((x) => [x.label, x.kind, x.input, x.risky]), [['Clear cache', 'run', 'none', true]]);
 });
 
 test('actions: read from the contracts, bound to the item key', async () => {
@@ -131,6 +183,11 @@ test('ask: says what it found, lists what was asked, offers the actions that clo
   assert.deepEqual(types.list, ['policy:p1']);
 
   assert.equal(ask(a, fs, 'open approval rules', ad.labels).open?.menu, 'Approval > Approval rules');
+  // a gap named in the question (what the chat's "fix it" sends): what it affects and the action that closes it, with its value
+  const all = evaluate(a.graph, RULES);
+  const fix = ask(a, all, `Fix this: ${all[0].title}`, ad.labels);
+  assert.deepEqual(fix.findings.map((f) => f.rule), ['share-without-approval']);
+  assert.deepEqual(fix.proposals.map((p) => [p.target, p.action.label, p.input]), [['rule:agent.share', 'Approval required', true]]);
   const none = ask(a, fs, 'zzz', ad.labels);
   assert.deepEqual([none.found, none.list], [[], []]);
   assert.match(none.text, /No item/);

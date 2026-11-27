@@ -84,6 +84,51 @@ def test_list_falls_back_to_linked_items_of_the_types_the_answer_names():
     assert r["list"] == ["tool:shell", "tool:web"]
 
 
+def test_proposals_carry_the_value_and_skip_what_is_already_so():
+    s = G.Session(idx())
+    # toggles take any boolean spelling; the current value is in actions[].now
+    assert s.get_item("Shell helper")["actions"][0] == {"id": "agents:PUT /api/admin/agents/{agentId}", "label": "Shared", "kind": "update", "input": "toggle", "now": "true"}
+    assert s.propose_action("Shell helper", "Shared", "shell on a shared agent", "off") == {"ok": True, "value": False}
+    # already that value: nothing to propose
+    r = s.propose_action("Policy checker", "Shared", "x", False)
+    assert r["ok"] is False and "already" in r["error"]
+    # a value a toggle cannot take is dropped, the proposal stays (the screen asks)
+    assert s.propose_action("Report writer", "Shared", "x", "maybe") == {"ok": True}
+    assert [p.get("value") for p in s.proposals] == [False, None]
+    # proposing the same action again replaces it (a follow-up that changes the value)
+    s.propose_action("Report writer", "Shared", "y", "no")
+    assert [(p["target"], p.get("value")) for p in s.proposals] == [("agent:a3", False), ("agent:a1", False)]
+
+
+def test_follow_up_changes_the_last_proposal():
+    seen = {}
+
+    def llm(messages, tools):
+        if "user" not in seen:
+            seen["user"] = messages[-1]["content"]
+            return {"choices": [{"message": {"content": "", "tool_calls": [{"id": "c1", "function": {"name": "propose_action", "arguments": json.dumps({"target": "agent:a3", "action": "Shared", "reason": "follow-up", "value": False})}}]}}]}
+        return {"choices": [{"message": {"content": "Changed the proposal to off."}}]}
+    hist = [{"role": "user", "text": "fix sharing for Shell helper"},
+            {"role": "assistant", "text": "Proposed: Shared.", "proposals": [{"target": "agent:a3", "action": "agents:PUT /api/admin/agents/{agentId}", "label": "Shared", "value": True}]}]
+    r = G.ask(idx(), "make it off instead", history=hist, llm=llm)
+    assert "[proposed: Shared on Shell helper (id agent:a3), value True]" in seen["user"]
+    assert [(p["target"], p["value"]) for p in r["proposals"]] == [("agent:a3", False)]
+
+
+def test_answers_do_not_claim_proposals_that_were_not_made():
+    r = G.ask(idx(), "Fix sharing for Shell helper", llm=scripted([
+        [("get_item", {"ref": "Shell helper"})],
+        "I proposed Delete for Shell helper. It is shared on a cloud model.",
+    ]))
+    assert "Delete" not in r["text"] and r["proposals"] == []
+    assert "shared on a cloud model" in r["text"]
+    r = G.ask(idx(), "Shell helper 공유 꺼 줘", llm=scripted([
+        [("propose_action", {"target": "Shell helper", "action": "Shared", "reason": "x", "value": "false"})],
+        "Shell helper 는 외부 모델을 씁니다.",
+    ]))
+    assert r["text"].endswith("「Shared」을(를) 제안했습니다. 승인하면 적용됩니다.")
+
+
 def test_http_endpoints(monkeypatch):
     monkeypatch.setenv("AEGIS_GRAPH", str(GRAPH))
     monkeypatch.setenv("AEGIS_ORIGINS", "http://allowed.example")
@@ -96,7 +141,7 @@ def test_http_endpoints(monkeypatch):
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     try:
         h = json.loads(urllib.request.urlopen(base + "/health").read())
-        assert h["ok"] and h["items"] == 22 and h["llm"] is False
+        assert h["ok"] and h["items"] == 24 and h["llm"] is False
 
         def post(path, body, origin="http://allowed.example"):
             req = urllib.request.Request(base + path, data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "Origin": origin})

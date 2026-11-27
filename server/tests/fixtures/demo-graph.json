@@ -1,5 +1,5 @@
 {
- "readAt": "2026-11-27T07:54:04.712Z",
+ "readAt": "2026-11-27T11:25:51.785Z",
  "types": {
   "User": {
    "label": "User",
@@ -32,6 +32,10 @@
   "ErrorGroup": {
    "label": "Error group",
    "screen": "System > System logs"
+  },
+  "List_audit_log": {
+   "label": "Audit log",
+   "screen": "System > Audit log"
   }
  },
  "nodes": [
@@ -50,7 +54,8 @@
      "id": "users:PUT /api/admin/users/{userId}/role",
      "label": "Role",
      "kind": "update",
-     "input": "choice"
+     "input": "choice",
+     "now": "admin"
     }
    ]
   },
@@ -69,7 +74,8 @@
      "id": "users:PUT /api/admin/users/{userId}/role",
      "label": "Role",
      "kind": "update",
-     "input": "choice"
+     "input": "choice",
+     "now": "maker"
     }
    ]
   },
@@ -88,7 +94,8 @@
      "id": "users:PUT /api/admin/users/{userId}/role",
      "label": "Role",
      "kind": "update",
-     "input": "choice"
+     "input": "choice",
+     "now": "staff"
     }
    ]
   },
@@ -132,6 +139,10 @@
     [
      "shared",
      "true"
+    ],
+    [
+     "calls",
+     "1200"
     ]
    ],
    "actions": [
@@ -139,7 +150,8 @@
      "id": "agents:PUT /api/admin/agents/{agentId}",
      "label": "Shared",
      "kind": "update",
-     "input": "toggle"
+     "input": "toggle",
+     "now": "true"
     },
     {
      "id": "agents:DELETE /api/admin/agents/{agentId}",
@@ -178,7 +190,8 @@
      "id": "agents:PUT /api/admin/agents/{agentId}",
      "label": "Shared",
      "kind": "update",
-     "input": "toggle"
+     "input": "toggle",
+     "now": "false"
     },
     {
      "id": "agents:DELETE /api/admin/agents/{agentId}",
@@ -203,7 +216,8 @@
      "id": "agents:PUT /api/admin/agents/{agentId}",
      "label": "Shared",
      "kind": "update",
-     "input": "toggle"
+     "input": "toggle",
+     "now": "true"
     },
     {
      "id": "agents:DELETE /api/admin/agents/{agentId}",
@@ -235,7 +249,8 @@
      "id": "approval-rules:PUT /api/admin/approval/rules/{action}",
      "label": "Approval required",
      "kind": "update",
-     "input": "toggle"
+     "input": "toggle",
+     "now": "false"
     }
    ]
   },
@@ -254,7 +269,8 @@
      "id": "approval-rules:PUT /api/admin/approval/rules/{action}",
      "label": "Approval required",
      "kind": "update",
-     "input": "toggle"
+     "input": "toggle",
+     "now": "true"
     }
    ]
   },
@@ -377,6 +393,62 @@
     ]
    ],
    "actions": []
+  },
+  {
+   "id": "list:audit-log:e1",
+   "type": "List_audit_log",
+   "title": "Audit log #1",
+   "attrs": [
+    [
+     "id",
+     "e1"
+    ],
+    [
+     "at",
+     "2026-11-27T09:00:00Z"
+    ],
+    [
+     "user_id",
+     "u2"
+    ],
+    [
+     "action",
+     "agent.share"
+    ],
+    [
+     "ok",
+     "true"
+    ]
+   ],
+   "actions": []
+  },
+  {
+   "id": "list:audit-log:e2",
+   "type": "List_audit_log",
+   "title": "Audit log #2",
+   "attrs": [
+    [
+     "id",
+     "e2"
+    ],
+    [
+     "at",
+     "2026-11-27T09:30:00Z"
+    ],
+    [
+     "user_id",
+     "u3"
+    ],
+    [
+     "action",
+     "agent.deploy"
+    ],
+    [
+     "ok",
+     "false"
+    ]
+   ],
+   "actions": []
   }
  ],
  "edges": [
@@ -474,6 +546,16 @@
    "error:warning||load_agent",
    "raisedBy",
    "service:api"
+  ],
+  [
+   "list:audit-log:e1",
+   "refersTo",
+   "user:u2"
+  ],
+  [
+   "list:audit-log:e2",
+   "refersTo",
+   "user:u3"
   ]
  ],
  "gaps": [

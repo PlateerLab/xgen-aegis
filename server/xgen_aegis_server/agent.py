@@ -31,6 +31,12 @@ Rules:
 - For "what is X made of / how many Y does X have" call related(X, Y) to fetch the list; if the type is unknown, the tool returns the linked types.
 - Propose actions only when the question asks to fix, change or stop something: open the item with get_item, pick an action from its actions whose
   label does what the gap's fix says, and call propose_action (up to three). Never claim something was changed; say it was proposed and waits for approval.
+- Give propose_action the value the action takes (actions[].input: toggle true/false, choice or text) when the question says it ("turn on" is
+  true, "stop" or "turn off" is false) or the gap's fix decides it. Leave it out otherwise; the screen asks. An action whose current value
+  (actions[].now) already equals the value changes nothing: do not propose it.
+- When the question shows [proposed: ...] and only changes that proposal ("make it off instead"), call propose_action again for the same
+  target and action with the new value.
+- Only say you proposed what you passed to propose_action.
 - If no action fits, say the host has no setting for it.
 - Do not end with "however ..." about problems nobody asked about.
 - No markdown, no ids."""
@@ -49,8 +55,10 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"item": {"type": "string"}, "severity": {"type": "string"}}}}},
     {"type": "function", "function": {"name": "related", "description": "Items of a type linked to an item (nearest layer first, up to 3 hops).",
      "parameters": {"type": "object", "properties": {"ref": {"type": "string"}, "type": {"type": "string"}, "hops": {"type": "integer"}}, "required": ["ref"]}}},
-    {"type": "function", "function": {"name": "propose_action", "description": "Propose an action for a person to approve. action is an id or label from get_item.actions.",
-     "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "action": {"type": "string"}, "reason": {"type": "string"}}, "required": ["target", "action", "reason"]}}},
+    {"type": "function", "function": {"name": "propose_action", "description": "Propose an action for a person to approve. action is an id or label from get_item.actions; value is what it is given (see actions[].input).",
+     "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "action": {"type": "string"}, "reason": {"type": "string"},
+                                                     "value": {"type": ["string", "boolean", "number"], "description": "toggle: true or false; choice or text: the value. Omit when not decided."}},
+                    "required": ["target", "action", "reason"]}}},
 ]
 
 
@@ -132,8 +140,10 @@ class Session:
         n = self.idx.node[u]
         gaps = [g for g in (self.idx.node[x].get("gap") for x in self.idx.node if self.idx.type_of[x] == I.GAP) if g and u in g["affected"]]
         return {"id": u, "name": self.idx.label_of[u], "type": self.label(n["type"]), "attrs": dict(n.get("attrs", [])), "link_counts": self.counts(u),
-                "links": self.idx.links(u)[:14], "gaps": [{"title": g["title"], "severity": g["severity"], "fix": g["fix"]} for g in gaps][:10],
-                "actions": [{"id": a["id"], "label": a["label"], "kind": a["kind"]} for a in n.get("actions", [])],
+                "links": self.idx.links(u)[:14],
+                "gaps": [{"title": g["title"], "severity": g["severity"], "fix": g["fix"], **({"close_with": g["closeWith"]} if g.get("closeWith") else {}),
+                          **({"close_value": g["closeValue"]} if "closeValue" in g else {})} for g in gaps][:10],
+                "actions": [{k: a[k] for k in ("id", "label", "kind", "input", "now") if k in a} for a in n.get("actions", [])],
                 "screen": self.idx.screen_of.get(n["type"])}
 
     def find_items(self, type: str, where: Optional[List[List[str]]] = None, sort_by: str = "", limit: int = 15) -> Dict[str, Any]:
@@ -210,7 +220,7 @@ class Session:
             out["farther"] = len(hits) - len(found)
         return out
 
-    def propose_action(self, target: str, action: str, reason: str) -> Dict[str, Any]:
+    def propose_action(self, target: str, action: str, reason: str, value: Any = None) -> Dict[str, Any]:
         u = self.resolve(target)
         if not u:
             return {"error": "no such target"}
@@ -218,9 +228,25 @@ class Session:
         a = next((x for x in acts if x["id"] == action or I.flat(x["label"]) == I.flat(action)), None)
         if not a:
             return {"error": "that item has no such action", "actions": [{"id": x["id"], "label": x["label"]} for x in acts]}
-        if len(self.proposals) < 3 and not any(p["target"] == u and p["action"] == a["id"] for p in self.proposals):
-            self.proposals.append({"target": u, "action": a["id"], "label": a["label"], "reason": reason[:160]})
-        return {"ok": True}
+        # the value, in the form the action takes; one that does not fit is dropped (the screen asks for it)
+        kind = a.get("input", "text")
+        v: Any = None
+        if value is not None and str(value).strip() != "" and kind != "none":
+            w = str(value).strip().lower()
+            if kind == "toggle":
+                v = True if w in _TRUE else False if w in _FALSE else None
+            else:
+                v = str(value).strip()[:200]
+        if v is not None and "now" in a and same_value(a["now"], str(v).lower()):
+            return {"ok": False, "error": f"already {a['now']}: nothing to change"}
+        p: Dict[str, Any] = {"target": u, "action": a["id"], "label": a["label"], "reason": reason[:160]}
+        if v is not None:
+            p["value"] = v
+        # the same action on the same target again replaces the earlier proposal (a follow-up that changes its value)
+        self.proposals = [x for x in self.proposals if not (x["target"] == u and x["action"] == a["id"])]
+        if len(self.proposals) < 3:
+            self.proposals.append(p)
+        return {"ok": True, **({"value": v} if v is not None else {})}
 
     def call(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         self.used.append({"name": name, "args": args})
@@ -231,6 +257,28 @@ class Session:
             return fn(**args)
         except TypeError as e:
             return {"error": f"bad arguments: {e}"}
+
+
+# A sentence that says something was proposed (English and Korean by default; AEGIS_CLAIM adds other languages)
+CLAIM = re.compile(os.getenv("AEGIS_CLAIM", r"(?i)\bpropos(e|ed|ing)\b|\bsuggest(ed)?\b|제안(했|합니다|드립니다|하겠)"))
+
+
+def honest(answer: str, s: "Session", idx: I.GraphIndex) -> str:
+    """Drop sentences that claim a proposal naming an action that was not passed to propose_action. If proposals were made and
+    no sentence is left that says so, say it in one line."""
+    labels = {a["label"] for n in idx.node.values() for a in n.get("actions", [])}
+    made = {p["label"] for p in s.proposals}
+    keep = []
+    for x in re.split(r"(?<=[.!?。])\s+|\n+", answer):
+        if CLAIM.search(x) and any(lab in x for lab in labels - made) and not any(lab in x for lab in made):
+            continue
+        keep.append(x)
+    out = " ".join(k for k in keep if k.strip()).strip()
+    if s.proposals and not any(CLAIM.search(k) for k in keep):
+        names = ", ".join(dict.fromkeys(p["label"] for p in s.proposals))
+        korean = re.search(r"[가-힣]", answer + names)
+        out = (out + " " if out else "") + (f"「{names}」을(를) 제안했습니다. 승인하면 적용됩니다." if korean else f"Proposed: {names}. It runs once approved.")
+    return out
 
 
 def llm_config() -> Tuple[str, str, str]:
@@ -269,6 +317,11 @@ def ask(idx: I.GraphIndex, question: str, *, selected: Optional[str] = None, his
         ctx.append(f"Type in the question: {s.label(t)} ({len(members)} items" + (f"; attributes e.g. {attrs})" if attrs else ")"))
     if selected and selected in idx.node:
         ctx.append(f"Selected item: {idx.label_of[selected]} (id {selected}). 'this' and 'it' mean this item.")
+    # the proposals of the last answer, so a short follow-up ("make it off instead") can change them
+    last = next((h for h in reversed(history or []) if h.get("role") == "assistant"), None)
+    for p in (last or {}).get("proposals") or []:
+        if isinstance(p, dict) and p.get("target") in idx.node:
+            ctx.append(f"[proposed: {p.get('label', p.get('action'))} on {idx.label_of[p['target']]} (id {p['target']})" + (f", value {p['value']}" if "value" in p else "") + "]")
     messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM}]
     for h in (history or [])[-6:]:
         if h.get("role") in ("user", "assistant") and h.get("text"):
@@ -290,6 +343,7 @@ def ask(idx: I.GraphIndex, question: str, *, selected: Optional[str] = None, his
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps(s.call(c["function"]["name"], args), ensure_ascii=False)[:6000]})
     if not answer:
         answer = (llm(messages + [{"role": "user", "content": "Answer with what you have."}], False)["choices"][0]["message"].get("content") or "").strip()
+    answer = honest(answer, s, idx)
     # no list tool used: among the anchors (found, opened, looked at), list the items linked through the types the answer or the
     # question names; prefer the anchor whose count matches a number in the answer
     if not s.last_list:

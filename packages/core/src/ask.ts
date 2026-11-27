@@ -18,7 +18,8 @@ export interface Answer {
   /** Items the answer is about (shown as a list and highlighted in the graph). */
   list: string[];
   findings: Finding[];
-  proposals: { target: string; action: Action; reason: string }[];
+  /** `input`: the value to give the action (a toggle's true/false, a choice, text), when the answer decided it. */
+  proposals: { target: string; action: Action; reason: string; input?: unknown }[];
   /** A screen the question asked to open. */
   open?: Menu;
 }
@@ -30,6 +31,7 @@ export interface Words {
   linked: (name: string, parts: string) => string;
   gaps: (n: number) => string;
   opened: (menu: string) => string;
+  gapNamed: (title: string, n: number) => string;
 }
 
 export const EN: Words = {
@@ -39,6 +41,7 @@ export const EN: Words = {
   linked: (name, parts) => `${name} is linked to ${parts}.`,
   gaps: (n) => `${n} control gap${n === 1 ? '' : 's'} on it.`,
   opened: (menu) => `Opened ${menu}.`,
+  gapNamed: (title, n) => `"${title}" affects ${n} item${n === 1 ? '' : 's'}.`,
 };
 
 export const KO: Words = {
@@ -48,6 +51,7 @@ export const KO: Words = {
   linked: (name, parts) => `${name}에 이어진 것은 ${parts}입니다.`,
   gaps: (n) => `걸린 통제 공백 ${n}개.`,
   opened: (menu) => `「${menu}」 화면을 열었습니다.`,
+  gapNamed: (title, n) => `「${title}」에 걸린 항목은 ${n}개입니다.`,
 };
 
 const flat = (s: string) => s.toLowerCase().replace(/\s+/g, '');
@@ -76,6 +80,17 @@ export function ask(aegis: Aegis, findings: Finding[], question: string, labels:
   const q = flat(question);
   const label = (t: string) => labels[t] ?? t;
   const empty: Answer = { text: words.notFound, found: [], list: [], findings: [], proposals: [] };
+  const closing = (fs: Finding[]) => fs.flatMap((f) =>
+    f.affected
+      .filter((id) => g.has(id))
+      .flatMap((id) => aegis.actionsFor(id).filter((a) => f.closeWith?.includes(a.label)).map((action) => ({ target: id, action, reason: f.fix, ...(f.closeValue !== undefined ? { input: f.closeValue } : {}) }))),
+  ).slice(0, 3);
+
+  // a control gap named in the question (the chat's "fix it" sends its title): the items it affects and the actions that close it
+  const gap = findings.find((f) => flat(f.title).length >= 6 && q.includes(flat(f.title)));
+  if (gap) {
+    return { ...empty, text: [words.gapNamed(gap.title, gap.affected.length), gap.fix].join(' '), list: gap.affected.filter((x) => g.has(x)), findings: [gap], proposals: closing([gap]) };
+  }
 
   // a screen named in the question
   const open = aegis.menus.find((m) => { const page = flat(m.menu.split(' > ').pop() ?? ''); return page.length >= 3 && q.includes(page); });
@@ -110,11 +125,7 @@ export function ask(aegis: Aegis, findings: Finding[], question: string, labels:
   const list = asked.length ? asked.flatMap((t) => byType.get(t)!.map((x) => x.id)) : found.map((x) => x.id);
   const fs = findings.filter((f) => found.some((x) => f.affected.includes(x.id)));
   const parts = (asked.length ? asked : [...byType.keys()]).map((t) => `${label(t)} ${byType.get(t)!.length}`).join(', ');
-  const proposals = fs.flatMap((f) =>
-    f.affected
-      .filter((id) => g.has(id))
-      .flatMap((id) => aegis.actionsFor(id).filter((a) => f.closeWith?.includes(a.label)).map((action) => ({ target: id, action, reason: f.fix }))),
-  ).slice(0, 3);
+  const proposals = closing(fs);
   const text = [
     words.found(found.map((x) => `"${x.title}"`).join(', ')),
     parts ? words.linked(`"${main.title}"`, parts) : '',

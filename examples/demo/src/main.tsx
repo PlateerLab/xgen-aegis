@@ -13,6 +13,6 @@ const server = new URLSearchParams(location.search).get('server');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AegisApp adapter={host} rules={RULES} title="Aegis demo" ask={server ? (q, aegis, findings) => askServer(server, aegis, findings, q, { labels: host.labels }) : undefined} />
+    <AegisApp adapter={host} rules={RULES} title="Aegis demo" ask={server ? (q, aegis, findings, history) => askServer(server, aegis, findings, q, { labels: host.labels, history }) : undefined} />
   </StrictMode>,
 );

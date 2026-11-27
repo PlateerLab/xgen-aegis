@@ -18,6 +18,10 @@ export interface HostState {
   /** Recent error log lines and service health (what the console's system screens show). */
   logs: Row[];
   services: Row[];
+  /** Calls per agent (a summary: only agents that were used appear). */
+  usage: Row[];
+  /** Audit events. No adapter source reads them: Aegis reads the audit screen's list itself. */
+  audit: Row[];
 }
 
 export function seed(): HostState {
@@ -53,6 +57,11 @@ export function seed(): HostState {
       { at: '2026-11-27T08:00:00Z', level: 'error', service: 'model-gateway', fn: 'call_model', exc: 'TimeoutError', agent: 'a1', msg: 'upstream model timed out after 60s' },
       { at: '2026-11-27T07:30:00Z', level: 'warning', service: 'api', fn: 'load_agent', exc: '', agent: 'a3', msg: 'agent definition not found, using last version' },
     ],
+    usage: [{ agent: 'a1', calls: 1200 }],
+    audit: [
+      { id: 'e1', at: '2026-11-27T09:00:00Z', user_id: 'u2', action: 'agent.share', ok: true, email: 'user2@example.com', message: 'shared the report writer with everyone' },
+      { id: 'e2', at: '2026-11-27T09:30:00Z', user_id: 'u3', action: 'agent.deploy', ok: false, email: 'user3@example.com', message: 'deploy without approval' },
+    ],
   };
 }
 
@@ -70,6 +79,9 @@ export function handler(state: HostState) {
     if (method === 'GET' && p === '/api/admin/tokens/policies') return state.policies;
     if (method === 'GET' && p === '/api/admin/logs/errors') return { logs: state.logs };
     if (method === 'GET' && p === '/api/admin/system/services') return state.services;
+    if (method === 'GET' && p === '/api/admin/agents/usage') return state.usage;
+    if (method === 'GET' && p === '/api/admin/audit/events') return { events: state.audit, total: state.audit.length };
+    if (method === 'POST' && p === '/api/admin/cache/clear') return { ok: true };
     if (method === 'PUT' && (m = p.match(/^\/api\/admin\/agents\/([^/]+)$/))) {
       const a = find(state.agents, 'id', m[1]);
       if (!a) throw new Error('agent not found');
@@ -152,7 +164,21 @@ export const CONTRACTS: ScreenContract[] = [
     elements: [
       el('Agents card', 'region', { method: 'GET', path: '/api/admin/agents/list', operation: 'listAgents' }, ['admin.dashboard:read']),
       el('Models card', 'region', { method: 'GET', path: '/api/admin/models', operation: 'listModels' }, ['admin.dashboard:read']),
+      el('Usage card', 'region', { method: 'GET', path: '/api/admin/agents/usage', operation: 'agentUsage' }, ['admin.dashboard:read']),
     ],
+  },
+  {
+    // No adapter source: Aegis reads this screen's list itself (through adapter.get) and keeps only the safe columns
+    featureId: 'audit-log', title: 'Audit log', route: '/admin?view=audit-log',
+    elements: [
+      el('Event table', 'table', { method: 'GET', path: '/api/admin/audit/events', operation: 'listEvents' }, ['admin.audit:read']),
+      el('Export', 'button', { method: 'GET', path: '/api/admin/audit/events/export', operation: 'exportEvents' }, ['admin.audit:read']),
+    ],
+  },
+  {
+    // Nothing to list, one thing to do: the screen still shows up with its action
+    featureId: 'cache', title: 'Cache', route: '/admin?view=cache',
+    elements: [el('Clear cache', 'button', { method: 'POST', path: '/api/admin/cache/clear', operation: 'clearCache' }, ['admin.cache:manage'])],
   },
 ];
 
@@ -165,7 +191,7 @@ export const TAXONOMY: Taxonomy = {
       { label: 'Users & access', sections: [{ label: 'Users', resources: ['admin.users'] }] },
       { label: 'Approval', sections: [{ label: 'Approval rules', resources: ['admin.approval'] }] },
       { label: 'Settings', sections: [{ label: 'Models', resources: ['admin.models'] }] },
-      { label: 'System', sections: [{ label: 'System logs', resources: ['admin.system'] }] },
+      { label: 'System', sections: [{ label: 'System logs', resources: ['admin.system'] }, { label: 'Audit log', resources: ['admin.audit'] }, { label: 'Cache', resources: ['admin.cache'] }] },
     ],
   },
 };
@@ -189,6 +215,7 @@ const SOURCES: Record<string, string> = {
   policies: '/api/admin/tokens/policies',
   logs: '/api/admin/logs/errors',
   services: '/api/admin/system/services',
+  usage: '/api/admin/agents/usage',
 };
 
 /** The adapter: the only code that knows this host. */
@@ -208,8 +235,9 @@ export function adapter(state: HostState): HostAdapter & { screensSync(): Screen
       const add = (it: Item) => { if (!items.some((x) => x.id === it.id)) items.push(it); };
       for (const u of d.users?.users ?? []) add({ id: `user:${u.id}`, type: 'User', title: u.name, props: { role: u.role }, ref: { source: 'users', key: u.id } });
       for (const m of d.models ?? []) add({ id: `model:${m.id}`, type: 'Model', title: m.name, props: { provider: m.provider, external: m.external }, ref: { source: 'models', key: m.id } });
+      const calls = new Map<string, number>((d.usage ?? []).map((u: any) => [u.agent, u.calls]));
       for (const a of d.agents?.items ?? []) {
-        add({ id: `agent:${a.id}`, type: 'Agent', title: a.name, props: { shared: a.shared }, ref: { source: 'agents', key: a.id } });
+        add({ id: `agent:${a.id}`, type: 'Agent', title: a.name, props: { shared: a.shared, ...(calls.has(a.id) ? { calls: calls.get(a.id) } : {}) }, ref: { source: 'agents', key: a.id } });
         links.push({ type: 'owns', from: `user:${a.owner}`, to: `agent:${a.id}` });
         links.push({ type: 'uses', from: `agent:${a.id}`, to: `model:${a.model}` });
         for (const t of a.tools ?? []) {
@@ -243,5 +271,7 @@ export function adapter(state: HostState): HostAdapter & { screensSync(): Screen
     },
     screensSync,
     call: (method: string, path: string, input: unknown, action?: Action) => call(method, path, action?.operation && BODY[action.operation] ? BODY[action.operation](input) : input),
+    // GET only: Aegis reads the lists of screens no source covers (the audit log here)
+    get: (path: string) => call('GET', path),
   };
 }

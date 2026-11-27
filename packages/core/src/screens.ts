@@ -6,7 +6,7 @@
  * item types it manages by matching the screen's APIs against the APIs the adapter read the items from.
  */
 
-import type { Provenance } from './provenance.ts';
+import { rowsOf, type Provenance } from './provenance.ts';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -48,6 +48,11 @@ export interface Menu {
   screens: string[];
 }
 
+/** Element roles that take input: a GET they call fills a picker or a filter, it is not a list on the screen. */
+export const INPUT_ROLES = new Set(['switch', 'checkbox', 'combobox', 'listbox', 'radio', 'radiogroup', 'textbox', 'spinbutton', 'searchbox']);
+
+const inputRead = (a: ScreenApi) => String(a.method).toUpperCase() === 'GET' && INPUT_ROLES.has(String(a.role ?? ''));
+
 const segs = (p: string) => p.split('?')[0].replace(/\/+$/, '').split('/');
 const isParam = (s: string) => /^(\{.*\}|\$\{.*\}|:\w+|<.*>|\[.*\])$/.test(s);
 
@@ -88,6 +93,9 @@ export const menuName = (s: Screen) => (s.menu ? s.menu.join(' > ') : s.title);
  *   2. a screen that writes to that source (the management screen, not a viewer),
  *   3. a screen that handles more of that source's APIs,
  *   4. a screen with fewer sources (focused on the type), then more APIs overall (the general screen of that resource).
+ * A screen that lists the narrowest source of a type (the source whose rows are that type's items and that changes the fewest
+ * types) also shows the type, even when another screen is its home. Every screen the host menu places is kept, also one
+ * with no data, so its actions can be used.
  */
 export function linkScreens(screens: Screen[], prov: Provenance, urls: Record<string, string>): Menu[] {
   const { feeds, lost } = prov;
@@ -97,7 +105,8 @@ export function linkScreens(screens: Screen[], prov: Provenance, urls: Record<st
   interface Work { menu: string; route: string; order: number; sources: string[]; apis: ScreenApi[]; screens: string[]; types: string[]; primary: string[] }
   const byMenu = new Map<string, Work>();
   for (const s of screens) {
-    const keys = Object.keys(feeds).filter((k) => urls[k] && s.apis.some((a) => (a.method === 'GET' && pathHit(a.path, urls[k])) || pathUnder(a.path, urls[k])));
+    // a GET behind a picker or a filter (the owner dropdown on an agents page) only reads that list, the screen does not show it
+    const keys = Object.keys(feeds).filter((k) => urls[k] && s.apis.some((a) => !inputRead(a) && ((a.method === 'GET' && pathHit(a.path, urls[k])) || pathUnder(a.path, urls[k]))));
     if (!keys.some((k) => feeds[k].length)) continue;
     const name = menuName(s);
     const m = byMenu.get(name) ?? { menu: name, route: s.route, order: s.order ?? 9999, sources: [], apis: [], screens: [], types: [], primary: [] };
@@ -125,9 +134,19 @@ export function linkScreens(screens: Screen[], prov: Provenance, urls: Record<st
       .sort((a, b) => w(b.m) - w(a.m) || h(b.m) - h(a.m) || a.m.sources.length - b.m.sources.length || b.m.apis.length - a.m.apis.length);
     top.forEach((x) => x.m.types.push(t));
     top[0].m.primary.push(t);
+    const own = Object.keys(feeds).filter((k) => urls[k] && feeds[k].includes(t) && rowsOf(prov, k, t));
+    const width = Math.min(...own.map((k) => feeds[k].length));
+    const narrow = own.filter((k) => feeds[k].length === width);
+    menus.filter((m) => !m.types.includes(t) && m.apis.some((a) => a.method === 'GET' && !inputRead(a) && narrow.some((k) => pathHit(a.path, urls[k])))).forEach((m) => m.types.push(t));
+  }
+  for (const s of screens) {
+    if (!s.menu || byMenu.has(menuName(s))) continue;
+    const m: Work = { menu: menuName(s), route: s.route, order: s.order ?? 9999, sources: [], apis: [...s.apis], screens: [s.id], types: [], primary: [] };
+    byMenu.set(m.menu, m);
+    menus.push(m);
   }
   return menus
-    .filter((m) => m.types.length)
+    .filter((m) => m.types.length || m.apis.some((a) => String(a.method).toUpperCase() !== 'GET'))
     .sort((a, b) => a.order - b.order)
     .map((m) => ({ menu: m.menu, route: m.route, types: m.types, primary: m.primary.length ? m.primary : undefined, screens: m.screens }));
 }

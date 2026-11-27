@@ -11,8 +11,11 @@ rules, policies, and the platform's own health (services, error logs, alerts), l
 - **Ask** anything about it ("which shared agents use an external model?", "why is Policy checker failing?", "is any service
   down?") and see the answer lit up in the graph, with what was found and the exact list.
 - **Find gaps**: your governance rules run over the ontology and say what is open and what would close it.
-- **Act**: the chat opens the console's own screen over the graph with the fix filled in. A person approves, then the adapter
-  makes the call. Nothing changes without approval.
+- **Act**: an answer that can fix something shows the change itself (*Approval required: false → true*). Say "yes" (or press
+  Apply) and a safe change with a decided value goes through; say "no" to drop it, or just say the other value ("make it off
+  instead"). Anything that cannot be undone, or still needs a value, opens the console's own screen over the graph (80% of it)
+  with the action filled in, and a person approves there. Nothing changes without a person saying so. An answer that finds a
+  control gap but proposes nothing offers one **Fix it** button.
 - **Diagnose** without reading server logs: error logs and alerts are items in the same ontology, linked to the agents they hit
   and the services they came from.
 
@@ -21,9 +24,17 @@ There is no hand-written menu or action table. Aegis learns the console's screen
 - **Screens and menus** come from *screen contracts* (one small file per admin screen: title, route, and the API each UI
   element calls) and the console's menu tree.
 - **Which screen manages which item type** is found by experiment: drop one API source, rebuild the graph, see which types
-  change. A source that creates items of a type is its home; the screen that reads *and writes* that source is its management
-  screen.
-- **Actions** are the write APIs in the contracts (`PUT`, `POST`, `DELETE`), bound to an item by its key in the console.
+  change. A source whose rows are a type's items (it makes some of them, or changes most of them) is its home; a summary that
+  only adds a count to a few items is not. The screen that reads *and writes* that source is its management screen. A list
+  behind a filter or a picker (the owner dropdown on an agents page) does not put users on that page.
+- **Every screen has something.** A screen the adapter does not read still has a list in its contract: with an optional
+  `get(path)` Aegis reads it (GET only) and keeps the rows as items of that screen, with only safe columns (ids, numbers, flags,
+  short words; no secrets, contact details, free text, names or bodies), rows keyed by their own id, and id columns linked to the
+  items they point at. A list that repeats a resource another source already makes is dropped. A screen with nothing to list
+  still shows up with its actions.
+- **Actions** are every write API in every contract (`PUT`, `POST`, `DELETE`). One with a path param works on the rows of the
+  type whose source is that resource (when a root source makes several types, the one named in the operation wins); the rest
+  are actions on the screen itself.
 
 ```mermaid
 flowchart LR
@@ -48,7 +59,8 @@ npm run demo             # http://localhost:5288, a stand-in console with agents
 ```
 
 The demo console lives in the page (`examples/demo/host.ts`): its API handler, its screen contracts, its menu tree and its
-adapter. Open *Approval › Approval rules*, turn on *Approval required* for `agent.share`, approve it, and watch the gap close.
+adapter. Ask *"how many Agent"*, press **Fix it**, then say *"yes"*, and watch the gap close. Open *System › Audit log* (a
+screen no adapter source reads: its list is read through `get`) or *System › Cache* (nothing to list, one action).
 Or ask *"which tools does Shell helper use"* and follow the proposal, or *"why is Policy checker failing? error group"* to see
 the failure trace to the error group and the service that is down.
 
@@ -85,6 +97,9 @@ export const adapter: HostAdapter = {
   async screens() { return screensFromContracts(CONTRACTS, MENU_TREE); },
   // Run an approved action. You know the console's API, so you build the request body.
   async call(method, path, input, action) { return send(method, path, bodyFor(action.operation, input)); },
+  // Optional: one GET, so Aegis can read the lists of screens read() does not cover.
+  async get(path) { return get(path); },
+  lists: { rows: 30, named: true },   // named: false numbers the rows instead of showing their names (for a public deployment)
   labels: { Agent: 'Agent' },
 };
 ```
@@ -106,12 +121,13 @@ Rules are your governance policy, as code over the graph:
 ```ts
 const RULES: Rule[] = [{
   id: 'share-without-approval', title: 'Agents on external models are shared without approval', severity: 'high',
-  fix: 'Require approval before an agent is shared.', closeWith: ['Approval required'],
+  fix: 'Require approval before an agent is shared.', closeWith: ['Approval required'], closeValue: true,
   check: (g) => g.ofType('Agent').filter((a) => a.props.shared && g.out(a.id, 'uses').some((m) => m.props.external)).map((a) => a.id),
 }];
 ```
 
-`closeWith` names the action label that closes the gap; the chat offers it on the affected items.
+`closeWith` names the action label that closes the gap and `closeValue` the value it is given; the chat offers it on the
+affected items with that value, and asking about the gap by name ("Fix this: ...") answers with those proposals.
 
 ## Screen contracts
 
@@ -160,7 +176,10 @@ the lists and the approvals, so swapping models does not change what is allowed.
 the graph (`ask` in `@xgen-aegis/core`).
 
 The LLM is grounded before it starts: OmniFuse links the names in the question to items, and the types the question names are
-passed with their real attributes and example values, so filters use the right spelling. `POST /ask` answers with the same shape as the graph-only answer
+passed with their real attributes and example values, so filters use the right spelling. Each action comes with its input kind
+and the item's current value: a proposal carries the value to give, one that equals the current value is not made, and a
+follow-up that only changes the value replaces the last proposal. A sentence that claims a proposal the model did not make is
+dropped from the answer. `POST /ask` answers with the same shape as the graph-only answer
 (`text`, `found`, `list`, `findings`, `proposals`); `POST /search` is OmniFuse alone. The graph file is re-indexed when it
 changes. Questions are rate limited per IP and per day and are not logged. If the server is unreachable the chat answers from
 the graph.
@@ -168,7 +187,7 @@ the graph.
 ## Status
 
 0.1. The core, scanner, React parts and server are tested (`npm test`, `pytest`) and the demo is checked end to end in a
-browser. Not yet: approval lines with several approvers, audit history of proposals, and packaged npm/PyPI releases.
+browser (screen lists, an action-only screen, Fix it, yes / no in the chat, the 80% screen, question kept at the top). Not yet: approval lines with several approvers, audit history of proposals, and packaged npm/PyPI releases.
 
 Next: from a diagnosed failure to a fix of the platform itself, in the same chat. An error group already knows its function,
 endpoint and the agents it hits; linking it to the code that raises it would let Aegis propose a code change as one more

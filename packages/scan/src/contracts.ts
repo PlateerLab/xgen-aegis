@@ -9,7 +9,7 @@
  * placed under the category whose sections guard the resources its elements use most; the page name is the contract title.
  */
 
-import type { Screen, ScreenApi } from '@xgen-aegis/core';
+import { INPUT_ROLES, type Screen, type ScreenApi } from '@xgen-aegis/core';
 
 export interface ContractElement {
   uiId: string;
@@ -61,7 +61,9 @@ export function screensFromContracts(contracts: ScreenContract[], taxonomy: Taxo
       if (!e.api || typeof e.api.path !== 'string') continue;
       const method = (e.api.method ?? 'GET').toUpperCase();
       const k = `${method} ${e.api.path}`;
-      if (!apis.has(k)) apis.set(k, { method, path: e.api.path, operation: e.api.operation ?? null, action: e.action ?? null, name: e.name ?? null, role: e.role ?? null });
+      const had = apis.get(k);
+      // one API behind a table and a filter is a list on the screen: the table's role wins over the picker's
+      if (!had || (INPUT_ROLES.has(String(had.role ?? '')) && e.role && !INPUT_ROLES.has(e.role))) apis.set(k, { method, path: e.api.path, operation: e.api.operation ?? null, action: e.action ?? null, name: e.name ?? null, role: e.role ?? null });
     }
     // the resource its elements use most, among those the menu tree knows
     const n = new Map<string, number>();
