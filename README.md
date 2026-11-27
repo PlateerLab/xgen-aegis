@@ -25,8 +25,10 @@ There is no hand-written menu or action table. Aegis learns the console's screen
   element calls) and the console's menu tree.
 - **Which screen manages which item type** is found by experiment: drop one API source, rebuild the graph, see which types
   change. A source whose rows are a type's items (it makes some of them, or changes most of them) is its home; a summary that
-  only adds a count to a few items is not. The screen that reads *and writes* that source is its management screen. A list
-  behind a filter or a picker (the owner dropdown on an agents page) does not put users on that page.
+  only adds a count to a few items is not. The screen that reads *and writes* that source is its management screen, and a
+  screen's own list makes that screen the home of its rows. A list behind a filter or a picker (the owner dropdown on an agents
+  page) does not put users on that page, unless it is the only list the page has (some consoles label a list with the search
+  box that loads it).
 - **Every screen has something.** A screen the adapter does not read still has a list in its contract: with an optional
   `get(path)` Aegis reads it (GET only) and keeps the rows as items of that screen, with only safe columns (ids, numbers, flags,
   short words; no secrets, contact details, free text, names or bodies), rows keyed by their own id, and id columns linked to the
@@ -34,7 +36,8 @@ There is no hand-written menu or action table. Aegis learns the console's screen
   still shows up with its actions.
 - **Actions** are every write API in every contract (`PUT`, `POST`, `DELETE`). One with a path param works on the rows of the
   type whose source is that resource (when a root source makes several types, the one named in the operation wins); the rest
-  are actions on the screen itself.
+  are actions on the screen itself. A save endpoint many pages share (one "save setting" API behind switches on several pages)
+  works on rows only on the home screen of its type; elsewhere it is that page's button.
 
 ```mermaid
 flowchart LR

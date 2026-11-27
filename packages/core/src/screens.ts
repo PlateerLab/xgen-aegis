@@ -52,6 +52,10 @@ export interface Menu {
 export const INPUT_ROLES = new Set(['switch', 'checkbox', 'combobox', 'listbox', 'radio', 'radiogroup', 'textbox', 'spinbutton', 'searchbox']);
 
 const inputRead = (a: ScreenApi) => String(a.method).toUpperCase() === 'GET' && INPUT_ROLES.has(String(a.role ?? ''));
+/** A screen with a list of its own (a GET behind a table, region ...): its pickers only read what to pick from. */
+const hasList = (s: Screen) => s.apis.some((a) => String(a.method).toUpperCase() === 'GET' && !inputRead(a));
+/** The list Aegis read for this screen itself (see lists.ts). */
+export const ownList = (key: string, screenId: string) => key === `list:${screenId}`;
 
 const segs = (p: string) => p.split('?')[0].replace(/\/+$/, '').split('/');
 const isParam = (s: string) => /^(\{.*\}|\$\{.*\}|:\w+|<.*>|\[.*\])$/.test(s);
@@ -102,16 +106,18 @@ export function linkScreens(screens: Screen[], prov: Provenance, urls: Record<st
   const dist = (k: string, t: string) =>
     !feeds[k]?.includes(t) ? Infinity : lost[k]?.[t] ? (100000 - lost[k][t]) * 100 + feeds[k].length : 1e8 + feeds[k].length;
 
-  interface Work { menu: string; route: string; order: number; sources: string[]; apis: ScreenApi[]; screens: string[]; types: string[]; primary: string[] }
+  interface Work { menu: string; route: string; order: number; sources: string[]; apis: (ScreenApi & { picker?: boolean })[]; screens: string[]; types: string[]; primary: string[] }
   const byMenu = new Map<string, Work>();
   for (const s of screens) {
-    // a GET behind a picker or a filter (the owner dropdown on an agents page) only reads that list, the screen does not show it
-    const keys = Object.keys(feeds).filter((k) => urls[k] && s.apis.some((a) => !inputRead(a) && ((a.method === 'GET' && pathHit(a.path, urls[k])) || pathUnder(a.path, urls[k]))));
+    // a GET behind a picker or a filter (the owner dropdown on an agents page) only reads what to pick from, when the screen has a
+    // list of its own; on a screen whose only list sits behind a search box, that GET is its list
+    const picker = (a: ScreenApi) => inputRead(a) && hasList(s);
+    const keys = Object.keys(feeds).filter((k) => urls[k] && s.apis.some((a) => (!picker(a) || ownList(k, s.id)) && ((a.method === 'GET' && pathHit(a.path, urls[k])) || pathUnder(a.path, urls[k]))));
     if (!keys.some((k) => feeds[k].length)) continue;
     const name = menuName(s);
     const m = byMenu.get(name) ?? { menu: name, route: s.route, order: s.order ?? 9999, sources: [], apis: [], screens: [], types: [], primary: [] };
     m.sources = [...new Set([...m.sources, ...keys])];
-    m.apis.push(...s.apis);
+    m.apis.push(...s.apis.map((a) => ({ ...a, picker: inputRead(a) && hasList(s) })));
     m.screens.push(s.id);
     m.order = Math.min(m.order, s.order ?? 9999);
     byMenu.set(name, m);
@@ -129,15 +135,17 @@ export function linkScreens(screens: Screen[], prov: Provenance, urls: Record<st
     const home = (m: Work) => m.sources.filter((k) => dist(k, t) === best);
     const w = (m: Work) => Number(home(m).some((k) => writes(m, k)));
     const h = (m: Work) => home(m).reduce((n, k) => n + handles(m, k), 0);
+    // a screen's own list makes types whose home is that screen, even when another screen reads the same path
+    const mine = (m: Work) => Number(home(m).some((k) => m.screens.some((id) => ownList(k, id))));
     const top = ranked
       .filter((x) => x.d === best)
-      .sort((a, b) => w(b.m) - w(a.m) || h(b.m) - h(a.m) || a.m.sources.length - b.m.sources.length || b.m.apis.length - a.m.apis.length);
+      .sort((a, b) => mine(b.m) - mine(a.m) || w(b.m) - w(a.m) || h(b.m) - h(a.m) || a.m.sources.length - b.m.sources.length || b.m.apis.length - a.m.apis.length);
     top.forEach((x) => x.m.types.push(t));
     top[0].m.primary.push(t);
     const own = Object.keys(feeds).filter((k) => urls[k] && feeds[k].includes(t) && rowsOf(prov, k, t));
     const width = Math.min(...own.map((k) => feeds[k].length));
     const narrow = own.filter((k) => feeds[k].length === width);
-    menus.filter((m) => !m.types.includes(t) && m.apis.some((a) => a.method === 'GET' && !inputRead(a) && narrow.some((k) => pathHit(a.path, urls[k])))).forEach((m) => m.types.push(t));
+    menus.filter((m) => !m.types.includes(t) && m.apis.some((a) => a.method === 'GET' && !(a as ScreenApi & { picker?: boolean }).picker && narrow.some((k) => pathHit(a.path, urls[k])))).forEach((m) => m.types.push(t));
   }
   for (const s of screens) {
     if (!s.menu || byMenu.has(menuName(s))) continue;

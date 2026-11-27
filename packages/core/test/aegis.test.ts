@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { adapter, seed } from '../../../examples/demo/host.ts';
 import { RULES } from '../../../examples/demo/rules.ts';
-import { ask, evaluate, load, pathHit, pathKin, pathParams, pathUnder, rowsOf, sameFamily, toSearchGraph, trimList } from '../src/index.ts';
+import { ask, bindActions, evaluate, linkScreens, load, pathHit, pathKin, pathParams, pathUnder, rowsOf, sameFamily, toSearchGraph, trimList, type Screen } from '../src/index.ts';
 
 const SHARE_RULE = RULES[0];
 
@@ -88,6 +88,37 @@ test('screen lists: rows keyed by their own id only, no titles when rows carry w
   assert.equal(trimList({ ok: true }), null);
   assert.ok(sameFamily('/api/admin/agents/list', '/api/admin/agents/42'));
   assert.ok(!sameFamily('/api/admin/audit/events', '/api/admin/logs/errors'));
+});
+
+test('screens: a list behind a search box is the list when the screen has no other; a screen owns its own list', () => {
+  const prov = { feeds: { items: ['Item'], 'list:logs': ['List_logs'] }, lost: { items: { Item: 2 }, 'list:logs': { List_logs: 3 } }, rows: { items: { Item: 1 }, 'list:logs': { List_logs: 1 } } };
+  const urls = { items: '/api/x/items', 'list:logs': '/api/y/logs' };
+  const sc = (id: string, apis: Screen['apis']): Screen => ({ id, title: id, route: `/${id}`, menu: ['M', id], apis });
+  const menus = linkScreens([
+    // the product labels the list GET with the search box that triggers it
+    sc('items', [{ method: 'GET', path: '/api/x/items', role: 'textbox' }]),
+    sc('logs', [{ method: 'GET', path: '/api/y/logs', role: 'table' }]),
+    // another screen reads the same logs and writes that family: still, the logs screen is their home
+    sc('ops', [{ method: 'GET', path: '/api/y/logs', role: 'region' }, { method: 'PUT', path: '/api/y/{id}', role: 'button' }]),
+  ], prov, urls);
+  assert.deepEqual(menus.find((m) => m.menu === 'M > items')!.types, ['Item']);
+  assert.deepEqual(menus.find((m) => m.menu === 'M > logs')!.primary, ['List_logs']);
+  assert.ok(!menus.find((m) => m.menu === 'M > ops')!.primary);
+});
+
+test('actions: a save endpoint several screens share works on rows only on the home screen', () => {
+  const prov = { feeds: { settings: ['Setting'] }, lost: { settings: { Setting: 5 } }, rows: { settings: { Setting: 1 } } };
+  const urls = { settings: '/api/config/all' };
+  const sc = (id: string, apis: Screen['apis']): Screen => ({ id, title: id, route: `/${id}`, menu: ['Settings', id], apis });
+  const screens = [
+    sc('all', [{ method: 'GET', path: '/api/config/all', role: 'table' }, { method: 'PUT', path: '/api/config/{name}', role: 'button', name: 'Edit' }]),
+    sc('audio', [{ method: 'GET', path: '/api/config/all', role: 'region' }, { method: 'PUT', path: '/api/config/{configName}', role: 'switch', name: 'Speech to text' }]),
+  ];
+  const menus = linkScreens(screens, prov, urls);
+  const bound = bindActions(menus, screens, prov, urls);
+  assert.deepEqual(bound.get('Settings > all')!.map((a) => [a.label, a.types]), [['Edit', ['Setting']]]);
+  // the audio switch changes one setting the contract does not name: it stays a button of the audio screen
+  assert.deepEqual(bound.get('Settings > audio')!.map((a) => [a.label, a.types]), [['Speech to text', []]]);
 });
 
 test('actions: every write API of every screen, bound to rows or to the screen', async () => {

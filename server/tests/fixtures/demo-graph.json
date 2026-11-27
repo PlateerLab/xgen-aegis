@@ -1,5 +1,5 @@
 {
- "readAt": "2026-11-27T11:25:51.785Z",
+ "readAt": "2026-11-27T12:06:20.830Z",
  "types": {
   "User": {
    "label": "User",
@@ -571,7 +571,8 @@
    ],
    "closeWith": [
     "Approval required"
-   ]
+   ],
+   "closeValue": true
   },
   {
    "id": "shell-on-shared-agent",
@@ -583,7 +584,8 @@
    ],
    "closeWith": [
     "Shared"
-   ]
+   ],
+   "closeValue": false
   }
  ]
 }

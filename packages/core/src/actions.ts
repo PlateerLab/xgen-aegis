@@ -62,10 +62,15 @@ export function actionsOf(screen: Screen): Action[] {
  * types whose source is the same resource (a source whose rows are that type's items, see rowsOf). When a root source makes
  * several types at once, the type whose name is in the action's operation or path wins, else the type that source makes most of.
  * An action with no path param, or none that matches, is an action on the screen itself (create, run, settings of the page).
+ * A write API several screens share (one "save setting" endpoint behind switches on many pages) changes only the rows each page
+ * is about, which the contract does not say: it works on rows only on the home screen of the type, elsewhere on the screen.
  * `names` gives the words a type goes by (its id and display label by default).
  */
 export function bindActions(menus: Menu[], screens: Screen[], prov: Provenance, urls: Record<string, string>, names: (type: string) => string[] = (t) => [t]): Map<string, Action[]> {
   const makes = (t: string) => Object.keys(prov.feeds).filter((k) => urls[k] && prov.feeds[k].includes(t) && rowsOf(prov, k, t));
+  const norm = (a: Action) => `${a.method} ${a.path.replace(/\$?\{[^}]*\}|:\w+/g, '{}')}`;
+  const sharedBy = new Map<string, number>();
+  for (const m of menus) new Set(screens.filter((s) => m.screens.includes(s.id)).flatMap(actionsOf).map(norm)).forEach((k) => sharedBy.set(k, (sharedBy.get(k) ?? 0) + 1));
   const out = new Map<string, Action[]>();
   for (const m of menus) {
     const seen = new Set<string>();
@@ -76,6 +81,7 @@ export function bindActions(menus: Menu[], screens: Screen[], prov: Provenance, 
       if (seen.has(key)) continue;
       seen.add(key);
       let types = a.params.length ? m.types.filter((t) => makes(t).some((k) => pathKin(a.path, urls[k]))) : [];
+      if (types.length && (sharedBy.get(norm(a)) ?? 0) > 1) types = types.filter((t) => m.primary?.includes(t));
       if (types.length > 1) {
         const text = `${a.operation ?? ''} ${a.path}`.toLowerCase();
         const named = types.filter((t) => names(t).some((n) => n.length >= 3 && text.includes(n.toLowerCase().replace(/\s+/g, ''))));
