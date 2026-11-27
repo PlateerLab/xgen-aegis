@@ -168,6 +168,17 @@ def test_list_is_the_item_the_answer_names_not_a_neighbor_list_of_the_same_size(
     assert r["list"] == ["agent:a1"]
 
 
+def test_a_selected_item_of_another_type_is_not_context():
+    seen = []
+
+    def llm(messages, tools):
+        seen.append(messages[-1]["content"])
+        return {"choices": [{"message": {"content": "ok"}}]}
+    G.ask(idx(), "which Error group hits it?", selected="user:u2", llm=llm)
+    G.ask(idx(), "what does it own?", selected="user:u2", llm=llm)
+    assert "Selected item" not in seen[0] and "Selected item: User 2" in seen[1]
+
+
 def test_list_falls_back_to_items_the_answer_names():
     r = G.ask(idx(), "Which agents use an external model?", llm=scripted([[("search_graph", {"query": "agents external model"})], "Report writer and Shell helper."]))
     assert set(r["list"]) == {"agent:a1", "agent:a3"}

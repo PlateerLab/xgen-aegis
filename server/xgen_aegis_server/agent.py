@@ -315,7 +315,10 @@ def ask(idx: I.GraphIndex, question: str, *, selected: Optional[str] = None, his
                     vals[k].append(str(v))
         attrs = "; ".join(f"{k}: {' / '.join(v)}" for k, v in list(vals.items())[:6])
         ctx.append(f"Type in the question: {s.label(t)} ({len(members)} items" + (f"; attributes e.g. {attrs})" if attrs else ")"))
-    if selected and selected in idx.node:
+    # the selected item is context only when the question names its type or no type at all ("that error ..." points back to the
+    # last answer's item, not to an agent or user still selected on screen)
+    named_types = [t for t in idx.types_in(question) if t != I.GAP]
+    if selected and selected in idx.node and (not named_types or idx.type_of[selected] in named_types):
         ctx.append(f"Selected item: {idx.label_of[selected]} (id {selected}). 'this' and 'it' mean this item.")
     # the proposals of the last answer, so a short follow-up ("make it off instead") can change them
     last = next((h for h in reversed(history or []) if h.get("role") == "assistant"), None)
