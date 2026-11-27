@@ -55,15 +55,17 @@ const flat = (s: string) => s.toLowerCase().replace(/\s+/g, '');
 /** Names in the question: exact (spaces ignored), or the leading 70% of a long name. Longer names win; names inside a found name are dropped. */
 export function namesIn(items: Item[], question: string): Item[] {
   const q = flat(question);
-  const hits = items
+  const all = items
     .map((it) => {
       const n = flat(it.title);
-      if (n.length >= 2 && q.includes(n)) return { it, len: n.length };
+      if (n.length >= 2 && q.includes(n)) return { it, len: n.length, part: '' };
       const cut = Math.max(6, Math.floor(n.length * 0.7));
-      return n.length >= 8 && q.includes(n.slice(0, cut)) ? { it, len: cut } : null;
+      return n.length >= 8 && q.includes(n.slice(0, cut)) ? { it, len: cut, part: n.slice(0, cut) } : null;
     })
-    .filter((x): x is { it: Item; len: number } => !!x)
-    .sort((a, b) => b.len - a.len);
+    .filter((x): x is { it: Item; len: number; part: string } => !!x);
+  // a leading-part match is dropped when a whole name already covers it
+  const whole = all.filter((x) => !x.part).map((x) => flat(x.it.title));
+  const hits = all.filter((x) => !x.part || !whole.some((w) => w.includes(x.part) || x.part.includes(w))).sort((a, b) => b.len - a.len);
   const keep: Item[] = [];
   for (const h of hits) if (!keep.some((k) => flat(k.title).includes(flat(h.it.title)))) keep.push(h.it);
   return keep;

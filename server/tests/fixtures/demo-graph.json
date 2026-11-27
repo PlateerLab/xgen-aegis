@@ -1,5 +1,5 @@
 {
- "readAt": "2026-11-27T07:12:32.154Z",
+ "readAt": "2026-11-27T07:54:04.712Z",
  "types": {
   "User": {
    "label": "User",
@@ -24,6 +24,14 @@
   "TokenPolicy": {
    "label": "Token limit",
    "screen": "Agent operations > Token limits"
+  },
+  "Service": {
+   "label": "Service",
+   "screen": "System > System logs"
+  },
+  "ErrorGroup": {
+   "label": "Error group",
+   "screen": "System > System logs"
   }
  },
  "nodes": [
@@ -261,6 +269,114 @@
     ]
    ],
    "actions": []
+  },
+  {
+   "id": "service:api",
+   "type": "Service",
+   "title": "api",
+   "attrs": [
+    [
+     "healthy",
+     "true"
+    ]
+   ],
+   "actions": []
+  },
+  {
+   "id": "service:vector-store",
+   "type": "Service",
+   "title": "vector-store",
+   "attrs": [
+    [
+     "healthy",
+     "false"
+    ]
+   ],
+   "actions": []
+  },
+  {
+   "id": "service:model-gateway",
+   "type": "Service",
+   "title": "model-gateway",
+   "attrs": [
+    [
+     "healthy",
+     "true"
+    ]
+   ],
+   "actions": []
+  },
+  {
+   "id": "error:error|ConnectionError|search_index",
+   "type": "ErrorGroup",
+   "title": "ConnectionError · search_index",
+   "attrs": [
+    [
+     "level",
+     "error"
+    ],
+    [
+     "count",
+     "3"
+    ],
+    [
+     "lastAt",
+     "2026-11-27T09:20:00Z"
+    ],
+    [
+     "sample",
+     "vector store unreachable"
+    ]
+   ],
+   "actions": []
+  },
+  {
+   "id": "error:error|TimeoutError|call_model",
+   "type": "ErrorGroup",
+   "title": "TimeoutError · call_model",
+   "attrs": [
+    [
+     "level",
+     "error"
+    ],
+    [
+     "count",
+     "1"
+    ],
+    [
+     "lastAt",
+     "2026-11-27T08:00:00Z"
+    ],
+    [
+     "sample",
+     "upstream model timed out after 60s"
+    ]
+   ],
+   "actions": []
+  },
+  {
+   "id": "error:warning||load_agent",
+   "type": "ErrorGroup",
+   "title": "warning · load_agent",
+   "attrs": [
+    [
+     "level",
+     "warning"
+    ],
+    [
+     "count",
+     "1"
+    ],
+    [
+     "lastAt",
+     "2026-11-27T07:30:00Z"
+    ],
+    [
+     "sample",
+     "agent definition not found, using last version"
+    ]
+   ],
+   "actions": []
   }
  ],
  "edges": [
@@ -323,6 +439,41 @@
    "policy:p1",
    "limits",
    "user:u3"
+  ],
+  [
+   "error:error|ConnectionError|search_index",
+   "hits",
+   "agent:a2"
+  ],
+  [
+   "error:error|ConnectionError|search_index",
+   "hits",
+   "agent:a1"
+  ],
+  [
+   "error:error|ConnectionError|search_index",
+   "raisedBy",
+   "service:vector-store"
+  ],
+  [
+   "error:error|TimeoutError|call_model",
+   "hits",
+   "agent:a1"
+  ],
+  [
+   "error:error|TimeoutError|call_model",
+   "raisedBy",
+   "service:model-gateway"
+  ],
+  [
+   "error:warning||load_agent",
+   "hits",
+   "agent:a3"
+  ],
+  [
+   "error:warning||load_agent",
+   "raisedBy",
+   "service:api"
   ]
  ],
  "gaps": [

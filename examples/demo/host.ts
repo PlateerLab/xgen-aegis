@@ -15,6 +15,9 @@ export interface HostState {
   users: Row[];
   rules: Row[];
   policies: Row[];
+  /** Recent error log lines and service health (what the console's system screens show). */
+  logs: Row[];
+  services: Row[];
 }
 
 export function seed(): HostState {
@@ -38,6 +41,18 @@ export function seed(): HostState {
       { action: 'agent.deploy', required: true },
     ],
     policies: [{ id: 'p1', target: 'u3', limit: 100000 }],
+    services: [
+      { name: 'api', healthy: true },
+      { name: 'vector-store', healthy: false },
+      { name: 'model-gateway', healthy: true },
+    ],
+    logs: [
+      { at: '2026-11-27T09:10:00Z', level: 'error', service: 'vector-store', fn: 'search_index', exc: 'ConnectionError', agent: 'a2', msg: 'vector store unreachable' },
+      { at: '2026-11-27T09:12:00Z', level: 'error', service: 'vector-store', fn: 'search_index', exc: 'ConnectionError', agent: 'a2', msg: 'vector store unreachable' },
+      { at: '2026-11-27T09:20:00Z', level: 'error', service: 'vector-store', fn: 'search_index', exc: 'ConnectionError', agent: 'a1', msg: 'vector store unreachable' },
+      { at: '2026-11-27T08:00:00Z', level: 'error', service: 'model-gateway', fn: 'call_model', exc: 'TimeoutError', agent: 'a1', msg: 'upstream model timed out after 60s' },
+      { at: '2026-11-27T07:30:00Z', level: 'warning', service: 'api', fn: 'load_agent', exc: '', agent: 'a3', msg: 'agent definition not found, using last version' },
+    ],
   };
 }
 
@@ -53,6 +68,8 @@ export function handler(state: HostState) {
     if (method === 'GET' && p === '/api/admin/users/all') return { users: state.users };
     if (method === 'GET' && p === '/api/admin/approval/rules') return state.rules;
     if (method === 'GET' && p === '/api/admin/tokens/policies') return state.policies;
+    if (method === 'GET' && p === '/api/admin/logs/errors') return { logs: state.logs };
+    if (method === 'GET' && p === '/api/admin/system/services') return state.services;
     if (method === 'PUT' && (m = p.match(/^\/api\/admin\/agents\/([^/]+)$/))) {
       const a = find(state.agents, 'id', m[1]);
       if (!a) throw new Error('agent not found');
@@ -123,6 +140,13 @@ export const CONTRACTS: ScreenContract[] = [
     ],
   },
   {
+    featureId: 'system-logs', title: 'System logs', route: '/admin?view=system-logs',
+    elements: [
+      el('Error log table', 'table', { method: 'GET', path: '/api/admin/logs/errors', operation: 'listErrors' }, ['admin.system:read']),
+      el('Service status', 'region', { method: 'GET', path: '/api/admin/system/services', operation: 'listServices' }, ['admin.system:read']),
+    ],
+  },
+  {
     // A dashboard that reads several lists but manages none of them
     featureId: 'dashboard', title: 'Dashboard', route: '/admin?view=dashboard',
     elements: [
@@ -141,6 +165,7 @@ export const TAXONOMY: Taxonomy = {
       { label: 'Users & access', sections: [{ label: 'Users', resources: ['admin.users'] }] },
       { label: 'Approval', sections: [{ label: 'Approval rules', resources: ['admin.approval'] }] },
       { label: 'Settings', sections: [{ label: 'Models', resources: ['admin.models'] }] },
+      { label: 'System', sections: [{ label: 'System logs', resources: ['admin.system'] }] },
     ],
   },
 };
@@ -162,6 +187,8 @@ const SOURCES: Record<string, string> = {
   users: '/api/admin/users/all',
   rules: '/api/admin/approval/rules',
   policies: '/api/admin/tokens/policies',
+  logs: '/api/admin/logs/errors',
+  services: '/api/admin/system/services',
 };
 
 /** The adapter: the only code that knows this host. */
@@ -195,9 +222,22 @@ export function adapter(state: HostState): HostAdapter & { screensSync(): Screen
         add({ id: `policy:${p.id}`, type: 'TokenPolicy', title: `Limit ${p.limit}`, props: { limit: p.limit }, ref: { source: 'policies', key: p.id } });
         links.push({ type: 'limits', from: `policy:${p.id}`, to: `user:${p.target}` });
       }
+      // Logs and health are items too: error groups (same level, exception and function) linked to the agents they hit and the
+      // service they came from, so the chat can answer "why is this agent failing" without opening server logs
+      for (const v of d.services ?? []) add({ id: `service:${v.name}`, type: 'Service', title: v.name, props: { healthy: v.healthy } });
+      const groups = new Map<string, any[]>();
+      for (const x of d.logs?.logs ?? []) groups.set(`${x.level}|${x.exc}|${x.fn}`, [...(groups.get(`${x.level}|${x.exc}|${x.fn}`) ?? []), x]);
+      for (const [key, xs] of groups) {
+        const [level, exc, fn] = key.split('|');
+        const id = `error:${key}`;
+        const at = xs.map((x) => x.at).sort();
+        add({ id, type: 'ErrorGroup', title: `${exc || level} · ${fn}`, props: { level, count: xs.length, lastAt: at[at.length - 1], sample: xs[0].msg } });
+        for (const ag of new Set(xs.map((x) => x.agent))) links.push({ type: 'hits', from: id, to: `agent:${ag}` });
+        for (const sv of new Set(xs.map((x) => x.service))) links.push({ type: 'raisedBy', from: id, to: `service:${sv}` });
+      }
       return { items, links: links.filter((l) => items.some((x) => x.id === l.from) && items.some((x) => x.id === l.to)) };
     },
-    labels: { ApprovalRule: 'Approval rule', TokenPolicy: 'Token limit' },
+    labels: { ApprovalRule: 'Approval rule', TokenPolicy: 'Token limit', ErrorGroup: 'Error group' },
     async screens() {
       return screensSync();
     },

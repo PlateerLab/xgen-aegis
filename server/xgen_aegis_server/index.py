@@ -110,6 +110,7 @@ class GraphIndex:
         q = flat(question)
         kinds = {w for w, _ in self.class_words}
         hit: Dict[str, int] = {}
+        prefix: Dict[str, str] = {}
         for u, lab in self.label_of.items():
             n = flat(lab)
             if len(n) >= 2 and n in q and lab.lower() not in kinds:
@@ -118,6 +119,10 @@ class GraphIndex:
                 cut = max(6, int(len(n) * 0.7))
                 if n[:cut] in q:
                     hit[u] = cut
+                    prefix[u] = n[:cut]
+        # a leading-part match is dropped when a whole name already covers it
+        whole = {flat(self.label_of[u]) for u in hit if u not in prefix}
+        hit = {u: v for u, v in hit.items() if u not in prefix or not any(prefix[u] in w or w in prefix[u] for w in whole)}
         keep: List[str] = []
         for u in sorted(hit, key=lambda x: -hit[x]):
             if not any(flat(self.label_of[u]) in flat(self.label_of[k]) for k in keep):

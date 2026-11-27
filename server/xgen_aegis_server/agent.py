@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.request
 from collections import deque
@@ -31,6 +32,7 @@ Rules:
 - Propose actions only when the question asks to fix, change or stop something: open the item with get_item, pick an action from its actions whose
   label does what the gap's fix says, and call propose_action (up to three). Never claim something was changed; say it was proposed and waits for approval.
 - If no action fits, say the host has no setting for it.
+- Do not end with "however ..." about problems nobody asked about.
 - No markdown, no ids."""
 
 TOOLS = [
@@ -57,6 +59,18 @@ def _num(v: Any) -> float:
         return float(str(v).replace(",", "").split()[0])
     except (ValueError, IndexError):
         return 0.0
+
+
+# Booleans come in many spellings; compare them as one
+_TRUE = {"true", "예", "yes", "y", "1", "on", "참"}
+_FALSE = {"false", "아니요", "아니오", "no", "n", "0", "off", "거짓"}
+
+
+def same_value(have: Any, want: str) -> bool:
+    h, w = str(have).strip().lower(), str(want).strip().lower()
+    if h in _TRUE | _FALSE and w in _TRUE | _FALSE:
+        return (h in _TRUE) == (w in _TRUE)
+    return h == w
 
 
 class Session:
@@ -135,7 +149,7 @@ class Session:
                     continue
                 k, op, v = cond
                 have = a.get(k)
-                if op in ("=", "==") and str(have) != v or op == "!=" and str(have) == v or op == "contains" and v not in str(have or ""):
+                if op in ("=", "==") and not same_value(have, v) or op == "!=" and same_value(have, v) or op == "contains" and v not in str(have or ""):
                     return False
                 if op in (">=", "<=") and (have is None or (op == ">=" and _num(have) < _num(v)) or (op == "<=" and _num(have) > _num(v))):
                     return False
@@ -147,7 +161,7 @@ class Session:
             for u in ids[:200]:
                 for k, v in self.idx.node[u].get("attrs", []):
                     names.setdefault(k, set()).add(str(v))
-            return {"count": 0, "note": "Nothing matches. Use attribute names and values exactly as below.", "attrs": {k: sorted(v)[:6] for k, v in names.items()}}
+            return {"count": 0, "error": "Nothing matches. Names or values may be spelled differently: retry with the spellings below, and answer zero only if that also finds nothing.", "attrs": {k: sorted(v)[:6] for k, v in names.items()}}
         if sort_by:
             hit.sort(key=lambda u: -_num(dict(self.idx.node[u].get("attrs", [])).get(sort_by, 0)))
         self.last_list, self.list_by = hit[:30], "find_items"
@@ -243,6 +257,16 @@ def ask(idx: I.GraphIndex, question: str, *, selected: Optional[str] = None, his
     found = [u for u in I.explore(idx, question)["found"] if idx.type_of[u] != I.GAP][:3]
     ctx = ["Linked by search: " + (", ".join(f"{idx.label_of[u]} (id {u}, type {s.label(idx.type_of[u])})" for u in found) if found else "nothing")]
     s.touched += found
+    # types the question names, with their real attributes and example values, so filtered searches start with the right spelling
+    for t in [t for t in idx.types_in(question) if t != I.GAP][:3]:
+        vals: Dict[str, List[str]] = {}
+        members = [u for u, x in idx.type_of.items() if x == t]
+        for u in members[:200]:
+            for k, v in idx.node[u].get("attrs", []):
+                if str(v) not in vals.setdefault(k, []) and len(vals[k]) < 3:
+                    vals[k].append(str(v))
+        attrs = "; ".join(f"{k}: {' / '.join(v)}" for k, v in list(vals.items())[:6])
+        ctx.append(f"Type in the question: {s.label(t)} ({len(members)} items" + (f"; attributes e.g. {attrs})" if attrs else ")"))
     if selected and selected in idx.node:
         ctx.append(f"Selected item: {idx.label_of[selected]} (id {selected}). 'this' and 'it' mean this item.")
     messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM}]
@@ -266,19 +290,27 @@ def ask(idx: I.GraphIndex, question: str, *, selected: Optional[str] = None, his
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps(s.call(c["function"]["name"], args), ensure_ascii=False)[:6000]})
     if not answer:
         answer = (llm(messages + [{"role": "user", "content": "Answer with what you have."}], False)["choices"][0]["message"].get("content") or "").strip()
-    # no list tool used: if the answer names linked types of the item it opened, list those linked items
+    # no list tool used: among the anchors (found, opened, looked at), list the items linked through the types the answer or the
+    # question names; prefer the anchor whose count matches a number in the answer
     if not s.last_list:
-        opened = found + [x for x in (s.resolve(str(c["args"].get("ref", ""))) for c in s.used if c["name"] == "get_item") if x]
+        asked = set(idx.types_in(question))
+        opened = [x for x in [*found, *(s.resolve(str(c["args"].get("ref", ""))) for c in s.used if c["name"] == "get_item"), *s.touched[:12]] if x and idx.type_of.get(x) != I.GAP]
+        numbers = {int(n) for n in re.findall(r"\d+", answer)}
+        named = [u for u in dict.fromkeys(s.touched) if u not in found and idx.type_of.get(u) != I.GAP and len(idx.label_of[u]) >= 2 and idx.label_of[u] in answer]
+        picks = []
         for u0 in dict.fromkeys(opened):
             near = idx.near(u0)
             rest, said = answer, set()
             for t in sorted({idx.type_of[x] for x in near}, key=lambda t: -len(s.label(t))):
-                if s.label(t) in rest:
+                if s.label(t) in rest or (t in asked and idx.type_of[u0] != t):
                     said.add(t)
                     rest = rest.replace(s.label(t), " ")
             if said:
-                s.last_list = [x for x in near if idx.type_of[x] in said][:30]
-                break
+                got = [x for x in near if idx.type_of[x] in said][:30]
+                mine = [x for x in named if idx.type_of[x] in said]
+                picks.append((len(got) in numbers or (len(mine) >= 2 and set(mine) <= set(got)), got))
+        if picks:
+            s.last_list = next((g for hit, g in picks if hit), None) or (named if len(named) >= 2 else picks[0][1])
     lst = [u for u in s.last_list if u in idx.node and idx.type_of[u] != I.GAP]
     if not lst:
         # still nothing: the items the answer names, among those the tools looked at

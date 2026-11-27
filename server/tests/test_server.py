@@ -22,7 +22,7 @@ def test_index_links_names_and_types_from_the_graph():
     assert i.names_in("which tools does Reportwriter use") == ["agent:a1"]
     assert i.names_in("Policy check results") == ["agent:a2"]
     assert i.types_in("how many approval rule entries") == ["ApprovalRule"]
-    assert set(i.near("agent:a1")) == {"user:u2", "model:m2", "tool:web", "tool:files"}
+    assert set(i.near("agent:a1")) == {"user:u2", "model:m2", "tool:web", "tool:files", "error:error|ConnectionError|search_index", "error:error|TimeoutError|call_model"}
     # control gaps are nodes linked to what they affect
     assert i.gap_count["agent:a3"] == 2
 
@@ -96,7 +96,7 @@ def test_http_endpoints(monkeypatch):
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     try:
         h = json.loads(urllib.request.urlopen(base + "/health").read())
-        assert h["ok"] and h["items"] == 16 and h["llm"] is False
+        assert h["ok"] and h["items"] == 22 and h["llm"] is False
 
         def post(path, body, origin="http://allowed.example"):
             req = urllib.request.Request(base + path, data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "Origin": origin})
@@ -120,3 +120,22 @@ def test_http_endpoints(monkeypatch):
 def test_list_falls_back_to_items_the_answer_names():
     r = G.ask(idx(), "Which agents use an external model?", llm=scripted([[("search_graph", {"query": "agents external model"})], "Report writer and Shell helper."]))
     assert set(r["list"]) == {"agent:a1", "agent:a3"}
+
+
+def test_filters_accept_any_boolean_spelling_and_say_when_nothing_matches():
+    s = G.Session(idx())
+    down = s.find_items("Service", [["healthy", "=", "no"]])
+    assert down["count"] == 1 and down["items"][0]["name"] == "vector-store"
+    assert s.find_items("Service", [["healthy", "=", "False"]])["count"] == 1
+    miss = s.find_items("Service", [["state", "=", "down"]])
+    assert miss["count"] == 0 and "error" in miss and "healthy" in miss["attrs"]
+
+
+def test_question_types_and_their_attributes_go_to_the_llm():
+    seen = {}
+
+    def llm(messages, tools):
+        seen["user"] = messages[-1]["content"]
+        return {"choices": [{"message": {"content": "vector-store is down."}}]}
+    G.ask(idx(), "which Service is down?", llm=llm)
+    assert "Type in the question: Service (3 items; attributes e.g. healthy: true / false)" in seen["user"]

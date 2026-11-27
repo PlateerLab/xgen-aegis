@@ -42,8 +42,10 @@ test('screens: each type gets the screen that manages it, in the host menu order
   const dash = a.menus.find((m) => m.menu === 'Overview > Dashboard');
   assert.ok(dash && dash.types.includes('Agent') && !dash.primary);
   assert.deepEqual(a.menus.map((m) => m.menu), [
-    'Overview > Dashboard', 'Agent operations > Agents', 'Agent operations > Token limits', 'Users & access > Users', 'Approval > Approval rules', 'Settings > Models',
+    'Overview > Dashboard', 'Agent operations > Agents', 'Agent operations > Token limits', 'Users & access > Users', 'Approval > Approval rules', 'Settings > Models', 'System > System logs',
   ]);
+  assert.equal(home('ErrorGroup'), 'System > System logs');
+  assert.equal(home('Service'), 'System > System logs');
   assert.equal(a.screenOf('Agent')?.route, '/admin?view=agents');
 });
 
@@ -142,4 +144,17 @@ test('search graph export carries labels, home screens, actions and gaps', async
   assert.deepEqual(sg.nodes.find((n) => n.id === 'rule:agent.share')!.actions.map((x) => x.label), ['Approval required']);
   assert.ok(sg.edges.some(([s, p, o]) => s === 'agent:a1' && p === 'uses' && o === 'model:m2'));
   assert.equal(sg.gaps[0].affected.length, 3);
+});
+
+test('logs are items too: an agent failure traces to the error group and the service behind it', async () => {
+  const ad = adapter(seed());
+  const a = await load(ad);
+  const r = ask(a, [], 'why is Policy checker failing? error group', ad.labels);
+  assert.deepEqual(r.found, ['agent:a2']);
+  assert.deepEqual(r.list, ['error:error|ConnectionError|search_index']);
+  const err = a.graph.get(r.list[0])!;
+  assert.equal(err.props.count, 3);
+  assert.deepEqual(a.graph.out(err.id, 'raisedBy').map((x) => [x.title, x.props.healthy]), [['vector-store', false]]);
+  // the same error group hits another agent too
+  assert.deepEqual(a.graph.out(err.id, 'hits').map((x) => x.title).sort(), ['Policy checker', 'Report writer']);
 });
