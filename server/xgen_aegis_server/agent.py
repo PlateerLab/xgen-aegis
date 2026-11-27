@@ -362,9 +362,16 @@ def ask(idx: I.GraphIndex, question: str, *, selected: Optional[str] = None, his
             if said:
                 got = [x for x in near if idx.type_of[x] in said][:30]
                 mine = [x for x in named if idx.type_of[x] in said]
-                picks.append((len(got) in numbers or (len(mine) >= 2 and set(mine) <= set(got)), got))
+                # the answer named items of that type: only a list holding them can be the answer's list
+                if mine and not set(mine) & set(got):
+                    continue
+                picks.append((len(got) in numbers or (len(mine) >= 2 and set(mine) <= set(got)), got, mine))
         if picks:
-            s.last_list = next((g for hit, g in picks if hit), None) or (named if len(named) >= 2 else picks[0][1])
+            # no list whose size matches the answer: the items of that type the answer names, else the first list
+            said_named = list(dict.fromkeys(x for _, _, m in picks for x in m))
+            s.last_list = next((g for hit, g, _ in picks if hit), None) or said_named or (named if len(named) >= 2 else picks[0][1])
+        elif named:
+            s.last_list = named
     lst = [u for u in s.last_list if u in idx.node and idx.type_of[u] != I.GAP]
     if not lst:
         # still nothing: the items the answer names, among those the tools looked at

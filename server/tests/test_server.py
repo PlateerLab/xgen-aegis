@@ -162,6 +162,12 @@ def test_http_endpoints(monkeypatch):
         srv.shutdown()
 
 
+def test_list_is_the_item_the_answer_names_not_a_neighbor_list_of_the_same_size():
+    # the answer names Report writer and says "1 Agent"; a neighbor list of one agent (the owner's other agent) must not win
+    r = G.ask(idx(), "the report thing", llm=scripted([[("get_item", {"ref": "User 2"})], [("get_item", {"ref": "Report writer"})], "Report writer is 1 Agent, shared."]))
+    assert r["list"] == ["agent:a1"]
+
+
 def test_list_falls_back_to_items_the_answer_names():
     r = G.ask(idx(), "Which agents use an external model?", llm=scripted([[("search_graph", {"query": "agents external model"})], "Report writer and Shell helper."]))
     assert set(r["list"]) == {"agent:a1", "agent:a3"}
