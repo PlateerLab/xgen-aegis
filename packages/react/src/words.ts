@@ -10,6 +10,8 @@ export interface UiWords {
   fixIt: string; fixAsk: (gap: string) => string;
   /** Screen: actions on the screen itself, and the note when a screen has nothing to list. */
   screenActions: string; noList: string;
+  /** Screen opened for an answer: widen to the whole screen, or back to the answer's rows. */
+  wholeScreen: string; onlyAnswer: (n: number) => string;
 }
 
 export const UI: UiWords = {
@@ -23,6 +25,7 @@ export const UI: UiWords = {
   state: { done: 'sent', dropped: 'dropped', stale: 'replaced by a newer answer' },
   fixIt: 'Fix it', fixAsk: (gap) => `Fix this: ${gap}`,
   screenActions: 'On this screen', noList: 'This screen has nothing to list. Its actions are above.',
+  wholeScreen: 'Show the whole screen', onlyAnswer: (n) => `Only the answer (${n})`,
 };
 
 export const KO_UI: UiWords = {
@@ -36,4 +39,5 @@ export const KO_UI: UiWords = {
   state: { done: '보냄', dropped: '버림', stale: '새 답으로 바뀜' },
   fixIt: '조치하기', fixAsk: (gap) => `「${gap}」 고쳐 줘`,
   screenActions: '이 화면의 조작', noList: '이 화면에는 목록이 없습니다. 위의 조작을 쓸 수 있습니다.',
+  wholeScreen: '이 화면 전체 보기', onlyAnswer: (n) => `대화 결과 ${n}개만`,
 };

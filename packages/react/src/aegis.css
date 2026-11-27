@@ -45,6 +45,9 @@
 .aegis-screen-title { flex: 1; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .aegis-screen-title b { font-size: 15px; }
 .aegis-icon { border: 0 !important; font-size: 18px; }
+.aegis-result { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--aegis-line); background: var(--aegis-accent-bg); }
+.aegis-result b { flex: 1; min-width: 200px; }
+.aegis-scope { margin-left: auto; }
 .aegis-screen-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--aegis-line); }
 .aegis-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
 .aegis-tabs button { border-radius: 999px; font-size: 12.5px; }

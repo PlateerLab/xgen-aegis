@@ -9,7 +9,9 @@ rules, policies, and the platform's own health (services, error logs, alerts), l
 **one chat box** instead of hopping between screens:
 
 - **Ask** anything about it ("which shared agents use an external model?", "why is Policy checker failing?", "is any service
-  down?") and see the answer lit up in the graph, with what was found and the exact list.
+  down?") and see the answer lit up in the graph, with what was found and the exact list. The answer pops up over the graph as
+  the console's own screen with just those rows and their actions (or the proposal's row with the action ready), so the work
+  happens where you are looking; the whole screen is one click away.
 - **Find gaps**: your governance rules run over the ontology and say what is open and what would close it.
 - **Act**: an answer that can fix something shows the change itself (*Approval required: false → true*). Say "yes" (or press
   Apply) and a safe change with a decided value goes through; say "no" to drop it, or just say the other value ("make it off

@@ -3,6 +3,8 @@
  * A proposal shows what it changes (now → new). Apply it with the button or just say yes; say no to drop it. A safe change with
  * a decided value runs at once; anything else opens the host screen with the action ready. An answer that finds control gaps but
  * proposes nothing offers one "fix it" button that asks for the fix. Each answer is scrolled so its question sits at the top.
+ * Every answer that points at items pops its result up over the graph: the host screen with just those rows (and their actions),
+ * or the proposal's target row with the action ready, so the work happens where people are looking.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -24,7 +26,7 @@ export interface AegisChatProps {
   onFocus?(ids: string[]): void;
   onSelect?(id: string): void;
   /** Open the host screen of an item (or a menu), optionally with an action ready on it. */
-  onOpen?(target: { menu?: string; focus?: string; action?: string; input?: unknown }): void;
+  onOpen?(target: ChatOpen): void;
   /** Apply a proposal (the person said yes). Resolves to what happened, shown in the chat. */
   onApply?(p: ChatProposal): Promise<string>;
   /** Messages pushed from outside (e.g. the result of an approval). */
@@ -32,10 +34,14 @@ export interface AegisChatProps {
   words?: UiWords;
 }
 
+/** What to open over the graph: a menu, an item (with an action ready), or the result of an answer (question, first line, items). */
+export interface ChatOpen { menu?: string; focus?: string; action?: string; input?: unknown; result?: { q: string; text: string; ids: string[] } }
+
 type State = 'open' | 'done' | 'dropped' | 'stale';
 interface Msg { id: number; me: boolean; text: string; a?: Answer; pending?: boolean; states?: State[] }
 
 const LIST = 8;
+const NL = String.fromCharCode(10);
 const show = (v: unknown) => (v === undefined || v === null || v === '' ? '–' : typeof v === 'boolean' ? String(v) : String(v));
 
 export function AegisChat({ aegis, ask, onFocus, onSelect, onOpen, onApply, notes = [], words = UI }: AegisChatProps) {
@@ -106,7 +112,13 @@ export function AegisChat({ aegis, ask, onFocus, onSelect, onOpen, onApply, note
     setMsgs((m) => m.map((x) => (x.id === id + 1 ? { id: x.id, me: false, text: a.text, a, states: a.proposals.map(() => 'open' as State) } : x.states ? { ...x, states: x.states.map((s) => (s === 'open' ? 'stale' : s)) } : x)));
     const ids = [...new Set([...a.found, ...a.list, ...a.findings.flatMap((f) => f.affected)])].filter((x) => aegis.graph.has(x));
     onFocus?.(ids);
+    // pop the result up where the work happens: the screen asked for, else the proposal's target with its action ready, else the
+    // items the answer lists (or the one it found)
+    const items = (a.list.length ? a.list : a.found).filter((x) => aegis.graph.has(x));
+    const result = { q: t, text: a.text.split(NL)[0], ids: items.length ? items : a.proposals.map((p) => p.target) };
     if (a.open) onOpen?.({ menu: a.open.menu });
+    else if (a.proposals.length) onOpen?.({ focus: a.proposals[0].target, action: a.proposals[0].action.id, input: a.proposals[0].input, result });
+    else if (items.length) onOpen?.({ focus: items.length === 1 ? items[0] : undefined, result });
   };
 
   const g = aegis.graph;

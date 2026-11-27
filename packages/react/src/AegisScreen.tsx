@@ -18,6 +18,8 @@ export interface AegisScreenProps {
   action?: string | null;
   /** Value to start that action with (what the chat proposed). */
   input?: unknown;
+  /** The answer this screen was opened for: only its rows are shown first (the whole screen is one click away). */
+  result?: { q: string; text: string; ids: string[] };
   onPropose(p: Proposal): void;
   onDecide(p: Proposal, approve: boolean): void;
   onSelect?(id: string): void;
@@ -52,9 +54,17 @@ function ActionEditor({ action, target, aegis, onPropose, onCancel, w, preset }:
   );
 }
 
-export function AegisScreen({ aegis, menu, findings, proposals, focus, action, input, onPropose, onDecide, onSelect, onClose, hostBase, words = UI }: AegisScreenProps) {
+export function AegisScreen({ aegis, menu, findings, proposals, focus, action, input, result, onPropose, onDecide, onSelect, onClose, hostBase, words = UI }: AegisScreenProps) {
   const g = aegis.graph;
-  const order = useMemo(() => [...(menu.primary ?? []), ...menu.types.filter((t) => !menu.primary?.includes(t))], [menu]);
+  const [scope, setScope] = useState<'result' | 'all'>(result ? 'result' : 'all');
+  const hits = useMemo(() => new Set(result?.ids ?? []), [result]);
+  const resultTypes = useMemo(() => {
+    const n = new Map<string, number>();
+    hits.forEach((id) => { const x = g.get(id); if (x) n.set(x.type, (n.get(x.type) ?? 0) + 1); });
+    return [...n.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  }, [g, hits]);
+  const screenOrder = useMemo(() => [...(menu.primary ?? []), ...menu.types.filter((t) => !menu.primary?.includes(t))], [menu]);
+  const order = scope === 'result' && resultTypes.length ? resultTypes : screenOrder;
   const [type, setType] = useState(() => (focus && g.get(focus)?.type) || order[0]);
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<{ row?: string; action: string } | null>(action ? { row: focus ?? undefined, action } : null);
@@ -76,8 +86,8 @@ export function AegisScreen({ aegis, menu, findings, proposals, focus, action, i
     return n;
   }, [findings]);
   const rows = useMemo(() => g.ofType(type)
-    .filter((x) => !q.trim() || x.title.toLowerCase().includes(q.trim().toLowerCase()))
-    .sort((a, b) => Number(b.id === focus) - Number(a.id === focus) || (gaps.get(b.id) ?? 0) - (gaps.get(a.id) ?? 0) || a.title.localeCompare(b.title)), [g, type, q, focus, gaps]);
+    .filter((x) => (scope === 'all' || hits.has(x.id)) && (!q.trim() || x.title.toLowerCase().includes(q.trim().toLowerCase())))
+    .sort((a, b) => Number(b.id === focus) - Number(a.id === focus) || (gaps.get(b.id) ?? 0) - (gaps.get(a.id) ?? 0) || a.title.localeCompare(b.title)), [g, type, q, focus, gaps, scope, hits]);
   const cols = useMemo(() => [...new Set(g.ofType(type).flatMap((x) => Object.keys(x.props)))].slice(0, COLS), [g, type]);
   const ids = new Set(menu.types.flatMap((t) => g.ofType(t).map((x) => x.id)));
   const waiting = proposals.filter((p) => p.status === 'proposed' && (!p.target || ids.has(p.target)) && menu.screens.includes(p.action.screen));
@@ -95,14 +105,26 @@ export function AegisScreen({ aegis, menu, findings, proposals, focus, action, i
           </div>
           <button type="button" className="aegis-icon" aria-label={words.close} onClick={onClose}>×</button>
         </div>
+        {result && (
+          <div className="aegis-result">
+            <span className="aegis-muted">{result.q}</span>
+            <b>{result.text}</b>
+            <button type="button" className="aegis-link aegis-scope" onClick={() => {
+              const next = scope === 'result' ? 'all' : 'result';
+              setScope(next);
+              const tabs = next === 'result' ? resultTypes : screenOrder;
+              if (!tabs.includes(type)) setType(tabs[0]);
+            }}>{scope === 'result' ? words.wholeScreen : words.onlyAnswer(result.ids.length)}</button>
+          </div>
+        )}
         <div className="aegis-screen-bar">
           {order.length > 1 && (
             <div className="aegis-tabs" role="tablist">
               {order.map((t) => <button key={t} type="button" role="tab" aria-selected={t === type} className={t === type ? 'on' : ''} onClick={() => setType(t)}>{aegis.label(t)} {g.ofType(t).length}</button>)}
             </div>
           )}
-          {coll.length > 0 && <span className="aegis-muted">{words.screenActions}</span>}
-          {coll.map((a) => <button key={a.id} type="button" className={a.risky ? 'aegis-risky-btn' : ''} onClick={() => setEditing({ action: a.id })}>{a.label}</button>)}
+          {scope === 'all' && coll.length > 0 && <span className="aegis-muted">{words.screenActions}</span>}
+          {scope === 'all' && coll.map((a) => <button key={a.id} type="button" className={a.risky ? 'aegis-risky-btn' : ''} onClick={() => setEditing({ action: a.id })}>{a.label}</button>)}
           <input className="aegis-search" placeholder={words.findByName} value={q} onChange={(e) => setQ(e.target.value)} aria-label={words.findByName} />
         </div>
         {editing && !editing.row && coll.find((a) => a.id === editing.action) && (
